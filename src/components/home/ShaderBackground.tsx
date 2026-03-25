@@ -10,10 +10,10 @@ precision highp float;
 uniform vec2 u_resolution;
 uniform float u_time;
 uniform vec2 u_mouse;
-const vec3 colorBase = vec3(1.0, 0.992, 0.976);
-const vec3 colorAmber = vec3(1.0, 0.749, 0.0);
-const vec3 colorHoney = vec3(0.984, 0.827, 0.353);
-const vec3 colorTerracotta = vec3(0.816, 0.447, 0.337);
+const vec3 colorBase = vec3(0.922, 0.827, 0.816);
+const vec3 colorAmber = vec3(0.843, 0.737, 0.808);
+const vec3 colorHoney = vec3(0.737, 0.698, 0.843);
+const vec3 colorTerracotta = vec3(0.867, 0.576, 0.537);
 vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
 float snoise(vec2 v){
     const vec4 C = vec4(0.211324865405187,0.366025403784439,-0.577350269189626,0.024390243902439);
