@@ -108,12 +108,12 @@ function NycMap({
           <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
         </filter>
         <linearGradient id="waterGrad" x1="0" y1="0" x2="0.5" y2="1">
-          <stop offset="0%" stopColor="rgba(180,130,60,0.15)" />
-          <stop offset="100%" stopColor="rgba(160,110,50,0.2)" />
+          <stop offset="0%" stopColor="rgb(180,130,60)" stopOpacity={0.15} />
+          <stop offset="100%" stopColor="rgb(160,110,50)" stopOpacity={0.2} />
         </linearGradient>
         <linearGradient id="landGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(210,160,80,0.35)" />
-          <stop offset="100%" stopColor="rgba(190,140,65,0.35)" />
+          <stop offset="0%" stopColor="rgb(210,160,80)" stopOpacity={0.35} />
+          <stop offset="100%" stopColor="rgb(190,140,65)" stopOpacity={0.35} />
         </linearGradient>
       </defs>
 
@@ -129,8 +129,8 @@ function NycMap({
         const isActive = selectedSlug === h.slug;
         const isLit    = litSlugs.includes(h.slug);
         const isHov    = hovered === h.slug;
-        const fill   = isActive ? "rgba(221,147,137,0.4)" : isLit ? "rgba(221,147,137,0.35)" : isHov ? "rgba(188,178,215,0.22)" : "rgba(188,178,215,0.12)";
-        const stroke = isActive ? "rgba(200,120,115,0.85)" : isLit ? "#DD9389" : isHov ? "rgba(160,148,190,0.55)" : "rgba(160,148,190,0.3)";
+        const fill   = isActive ? "rgba(13,35,124,0.2)" : isLit ? "rgba(13,35,124,0.18)" : isHov ? "rgba(217,160,144,0.22)" : "rgba(217,160,144,0.1)";
+        const stroke = isActive ? "rgba(13,35,124,0.65)" : isLit ? "#0D237C" : isHov ? "rgba(143,31,23,0.45)" : "rgba(143,31,23,0.2)";
         const sw     = isActive ? 1.8 : isLit ? 1.5 : isHov ? 1.2 : 0.8;
         return (
           <g key={h.slug}>

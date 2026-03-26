@@ -316,9 +316,14 @@ function RippleCanvas() {
 // ─────────────────────────────────────────────
 //  Abstract NYC Map — line art style
 // ─────────────────────────────────────────────
-function NYCMap({ activeId, onSelect, onExplore }: { activeId: string | null; onSelect: (id: string) => void; onExplore: (id: string) => void }) {
+function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
+  activeId: string | null;
+  onSelect: (id: string, x: number, y: number) => void;
+  onDeselect: () => void;
+  onExplore: (id: string) => void;
+  svgRef: React.RefObject<SVGSVGElement>;
+}) {
   const [hovered, setHovered] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const manhattanOutline = `M 118.9 491.2 L 110.4 489.8 L 118.9 491.2 Z M 128.1 480.7 L 117.9 481.2 L 128.1 480.7 Z M 129.5 478.7 L 121.8 476.8 L 129.5 478.7 Z M 136.0 471.4 L 129.0 471.2 L 140.4 467.1 L 136.0 471.4 Z M 75.0 423.2 L 69.7 437.6 L 105.6 439.7 L 125.2 453.3 L 90.1 473.5 L 69.8 475.0 L 67.5 462.8 L 48.3 458.5 L 58.3 423.9 L 75.0 423.2 Z M 124.5 426.9 L 116.5 448.2 L 69.7 437.6 L 75.1 422.7 L 59.6 419.0 L 72.4 419.2 L 62.2 416.7 L 74.2 415.9 L 80.7 404.1 L 124.5 426.9 Z M 80.3 518.2 L 90.8 513.6 L 80.3 518.2 Z M 102.8 509.6 L 92.1 510.2 L 102.8 509.6 Z M 107.3 506.0 L 96.1 506.3 L 107.3 506.0 Z M 101.6 500.0 L 110.6 501.8 L 101.6 500.0 Z M -45.1 502.5 L -59.8 503.2 L -45.1 502.5 Z M 114.4 497.9 L 103.6 498.1 L 114.4 497.9 Z M 58.1 493.8 L 76.8 496.1 L 75.0 505.0 L 34.1 522.6 L 21.0 516.5 L 58.1 493.8 Z M 116.0 495.3 L 106.6 494.1 L 116.0 495.3 Z M -30.2 472.9 L -23.6 479.9 L -44.3 480.8 L -30.2 472.9 Z M 59.6 462.0 L 67.6 462.9 L 67.8 475.1 L 53.8 465.6 L 59.6 462.0 Z M 111.2 397.0 L 150.0 408.6 L 136.9 430.5 L 64.0 402.5 L 111.2 397.0 Z M 160.3 380.2 L 150.0 408.6 L 111.2 397.0 L 133.9 372.1 L 160.3 380.2 Z M 87.1 357.9 L 133.9 372.1 L 111.2 397.0 L 67.1 396.7 L 80.0 386.0 L 68.6 383.2 L 81.1 382.9 L 82.3 367.1 L 73.7 362.7 L 87.1 357.9 Z M 180.9 449.1 L 125.2 453.3 L 115.9 437.5 L 141.7 424.3 L 177.7 435.4 L 180.9 449.1 Z M 216.8 423.5 L 210.1 443.8 L 180.9 449.1 L 177.7 435.4 L 141.7 424.3 L 150.0 408.6 L 216.8 423.5 Z M 229.3 404.0 L 222.5 424.0 L 150.0 408.6 L 160.3 380.2 L 229.3 404.0 Z M 115.1 303.2 L 153.7 324.1 L 132.9 344.9 L 154.5 351.5 L 133.9 372.1 L 75.7 355.0 L 88.0 354.0 L 77.0 349.3 L 85.9 348.9 L 77.8 346.5 L 86.7 346.1 L 78.5 343.7 L 87.4 343.3 L 79.2 340.8 L 89.8 331.2 L 83.9 329.0 L 103.6 315.6 L 95.2 311.6 L 115.1 303.2 Z M 136.7 272.8 L 189.0 289.1 L 153.7 324.1 L 138.0 319.3 L 139.1 310.5 L 107.6 299.6 L 123.3 299.7 L 113.2 294.1 L 126.1 296.9 L 115.9 290.2 L 129.2 293.3 L 119.4 286.7 L 132.7 289.8 L 122.9 283.2 L 133.0 285.4 L 125.6 280.6 L 135.9 282.4 L 141.2 277.7 L 133.0 274.8 L 143.0 275.3 L 136.7 272.8 Z M 194.8 343.4 L 160.3 380.2 L 133.9 372.1 L 154.5 351.5 L 132.9 344.9 L 146.8 331.1 L 194.8 343.4 Z M 224.6 297.7 L 236.8 301.5 L 194.8 343.4 L 146.8 331.1 L 190.0 288.1 L 224.6 297.7 Z M 216.8 377.6 L 229.9 401.8 L 188.3 388.7 L 203.6 373.4 L 216.8 377.6 Z M 203.6 373.4 L 188.3 388.7 L 160.3 380.2 L 182.5 355.6 L 203.6 373.4 Z M 266.6 388.1 L 260.0 388.5 L 266.6 388.1 Z M 213.0 333.2 L 244.0 342.8 L 228.9 357.3 L 226.6 376.4 L 219.3 374.7 L 224.9 378.4 L 187.9 366.2 L 194.7 359.3 L 182.5 355.6 L 213.0 333.2 Z M 249.1 305.2 L 279.9 313.5 L 240.2 336.8 L 204.3 330.5 L 236.8 301.5 L 249.1 305.2 Z M 253.9 331.8 L 236.1 340.3 L 253.9 331.8 Z M 217.0 261.0 L 189.0 289.1 L 136.2 271.4 L 145.0 273.1 L 167.1 250.3 L 217.0 261.0 Z M 258.2 220.0 L 217.0 261.0 L 167.1 250.3 L 211.7 203.7 L 258.2 220.0 Z M 275.5 195.7 L 258.2 220.0 L 211.7 203.7 L 231.9 182.9 L 275.5 195.7 Z M 343.4 284.5 L 268.3 337.9 L 350.0 273.8 L 343.4 284.5 Z M 280.4 313.2 L 249.1 305.2 L 284.4 270.0 L 321.7 281.5 L 280.4 313.2 Z M 314.7 239.9 L 249.1 305.2 L 224.6 297.7 L 290.2 232.3 L 314.7 239.9 Z M 357.7 251.9 L 351.8 255.4 L 357.7 251.9 Z M 336.5 253.8 L 342.3 265.4 L 321.7 281.5 L 284.4 270.0 L 314.7 239.9 L 336.5 253.8 Z M 304.2 167.3 L 275.5 195.7 L 231.9 182.9 L 266.4 148.9 L 304.2 167.3 Z M 327.1 140.1 L 304.2 167.3 L 266.4 148.9 L 282.0 136.0 L 277.4 131.7 L 327.1 140.1 Z M 348.9 114.7 L 353.1 120.7 L 330.6 141.2 L 277.4 131.7 L 311.4 104.1 L 348.9 114.7 Z M 343.5 179.3 L 315.1 207.6 L 275.5 195.7 L 304.2 167.3 L 343.5 179.3 Z M 368.7 108.6 L 372.8 149.6 L 343.5 179.3 L 304.2 167.3 L 370.5 99.2 L 368.7 108.6 Z M 346.3 219.5 L 369.1 221.9 L 336.4 246.9 L 290.2 232.3 L 318.6 204.1 L 346.3 219.5 Z M 373.7 145.4 L 371.8 172.5 L 392.0 195.9 L 388.9 212.9 L 355.4 222.3 L 318.6 204.1 L 373.7 145.4 Z M 440.1 205.3 L 450.0 216.0 L 410.7 247.2 L 365.5 243.3 L 385.1 223.8 L 403.1 224.5 L 394.6 218.3 L 405.5 193.5 L 440.1 205.3 Z M 383.0 67.8 L 348.9 114.7 L 311.4 104.1 L 326.9 77.6 L 323.7 59.4 L 383.0 67.8 Z M 393.2 14.4 L 408.3 28.7 L 400.1 39.9 L 408.7 41.7 L 389.2 65.9 L 323.7 59.4 L 343.1 50.0 L 379.3 6.1 L 393.2 14.4 Z M 415.4 36.2 L 417.7 45.1 L 348.9 114.7 L 367.1 83.6 L 399.4 56.7 L 408.7 41.4 L 400.2 36.5 L 408.3 28.7 L 415.4 36.2 Z M 315.1 207.6 L 224.6 297.7 L 192.3 287.7 L 281.1 197.3 L 315.1 207.6 Z`;
 
@@ -328,7 +333,7 @@ function NYCMap({ activeId, onSelect, onExplore }: { activeId: string | null; on
 
   return (
     <>
-    <svg viewBox="18 70 384 480" style={{ width: "100%", height: "100%", display: "block" }} onClick={() => setTooltip(null)}>
+    <svg ref={svgRef} viewBox="18 70 384 480" style={{ width: "100%", height: "100%", display: "block" }} onClick={onDeselect}>
       <defs>
         {/* Hatching patterns per neighborhood */}
         {HOODS.map(hood => (
@@ -356,12 +361,12 @@ function NYCMap({ activeId, onSelect, onExplore }: { activeId: string | null; on
 
         {/* Water gradient */}
         <linearGradient id="waterGrad" x1="0" y1="0" x2="0.5" y2="1">
-          <stop offset="0%" stopColor="rgba(180,130,60,0.15)" />
-          <stop offset="100%" stopColor="rgba(160,110,50,0.2)" />
+          <stop offset="0%" stopColor="rgb(180,130,60)" stopOpacity={0.15} />
+          <stop offset="100%" stopColor="rgb(160,110,50)" stopOpacity={0.2} />
         </linearGradient>
         <linearGradient id="landGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(210,160,80,0.35)" />
-          <stop offset="100%" stopColor="rgba(190,140,65,0.35)" />
+          <stop offset="0%" stopColor="rgb(210,160,80)" stopOpacity={0.35} />
+          <stop offset="100%" stopColor="rgb(190,140,65)" stopOpacity={0.35} />
         </linearGradient>
       </defs>
 
@@ -404,8 +409,8 @@ function NYCMap({ activeId, onSelect, onExplore }: { activeId: string | null; on
         const isActive = activeId === hood.id;
         const isHovered = hovered === hood.id;
 
-        const fill   = isActive ? "rgba(221,147,137,0.4)" : isHovered ? "rgba(188,178,215,0.22)" : "rgba(188,178,215,0.12)";
-        const stroke = isActive ? "rgba(200,120,115,0.85)" : isHovered ? "rgba(160,148,190,0.55)" : "rgba(160,148,190,0.3)";
+        const fill   = isActive ? "rgba(13,35,124,0.2)" : isHovered ? "rgba(217,160,144,0.22)" : "rgba(217,160,144,0.1)";
+        const stroke = isActive ? "rgba(13,35,124,0.65)" : isHovered ? "rgba(143,31,23,0.45)" : "rgba(143,31,23,0.2)";
         const sw     = isActive ? 1.8 : isHovered ? 1.2 : 0.8;
         return (
           <g key={hood.id}>
@@ -417,12 +422,12 @@ function NYCMap({ activeId, onSelect, onExplore }: { activeId: string | null; on
               style={{ cursor: "pointer", transition: "stroke 0.25s, stroke-width 0.25s" }}
               onMouseEnter={() => setHovered(hood.id)}
               onMouseLeave={() => setHovered(null)}
-              onClick={e => { e.stopPropagation(); onSelect(hood.id); setTooltip(prev => prev?.id === hood.id ? null : { id: hood.id, x: e.clientX, y: e.clientY }); }} />
+              onClick={e => { e.stopPropagation(); onSelect(hood.id, e.clientX, e.clientY); }} />
             <path d={hood.path} fill="transparent" stroke="transparent" strokeWidth={10}
               style={{ cursor: "pointer" }}
               onMouseEnter={() => setHovered(hood.id)}
               onMouseLeave={() => setHovered(null)}
-              onClick={e => { e.stopPropagation(); onSelect(hood.id); setTooltip(prev => prev?.id === hood.id ? null : { id: hood.id, x: e.clientX, y: e.clientY }); }} />
+              onClick={e => { e.stopPropagation(); onSelect(hood.id, e.clientX, e.clientY); }} />
           </g>
         );
       })}
@@ -457,35 +462,6 @@ function NYCMap({ activeId, onSelect, onExplore }: { activeId: string | null; on
           fontSize={5} fontFamily="'DM Sans', sans-serif" letterSpacing="0.12">1 MI</text>
       </g>
     </svg>
-    {tooltip && (() => {
-      const th = HOODS.find(n => n.id === tooltip.id);
-      if (!th) return null;
-      const showLeft = tooltip.x > window.innerWidth * 0.7;
-      const showAbove = tooltip.y > window.innerHeight * 0.75;
-      return (
-        <div key={th.id} style={{
-          position: "fixed",
-          left: tooltip.x + (showLeft ? -12 : 12),
-          top: tooltip.y + (showAbove ? -10 : 10),
-          transform: `translate(${showLeft ? "-100%" : "0"}, ${showAbove ? "-100%" : "0"})`,
-          background: "rgba(235,211,208,0.82)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          border: "0.5px solid rgba(180,140,130,0.2)",
-          borderRadius: "10px",
-          padding: "12px 16px",
-          minWidth: "150px",
-          pointerEvents: "auto",
-          zIndex: 20,
-          animation: "fadeIn 0.2s ease",
-        }}>
-          <div style={{ fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: 4, fontFamily: "'DM Sans', sans-serif" }}>{th.borough}</div>
-          <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1rem", color: "#5a3535", marginBottom: 3 }}>{th.name}</div>
-          <div style={{ fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", fontFamily: "'DM Sans', sans-serif" }}>{th.mood}</div>
-          <div onClick={() => onExplore(th.id)} style={{ marginTop: 8, fontSize: "0.65rem", color: "#DD9389", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Explore →</div>
-        </div>
-      );
-    })()}
     </>
   );
 }
@@ -514,10 +490,6 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
           position: "absolute", bottom: "30px", left: "10%", right: "10%", height: "1px",
           background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.6) 25%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0.6) 75%, transparent)",
         }} />
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0, height: "65px",
-          background: "linear-gradient(to top, rgba(0,0,0,0.52) 0%, transparent 100%)",
-        }} />
         {/* Text */}
         <div className="lt-text" style={{
           position: "absolute", inset: 0, display: "flex", flexDirection: "column",
@@ -526,36 +498,36 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
           <span style={{
             fontFamily: "'Cormorant Garamond', serif", fontSize: "26px", fontWeight: 300,
             color: phase.textColor, letterSpacing: "-0.01em", lineHeight: 1.1,
-            textShadow: "0 1px 16px rgba(0,0,0,0.65)", transition: "color 2s ease",
+            transition: "color 2s ease",
           }}>{phase.label}</span>
           <span style={{
             fontFamily: "'Cormorant Garamond', serif", fontSize: "11px", fontWeight: 300, fontStyle: "italic",
             color: phase.textColor, opacity: 0.72, letterSpacing: "0.04em",
-            textShadow: "0 1px 10px rgba(0,0,0,0.65)", transition: "color 2s ease",
+            transition: "color 2s ease",
           }}>{phase.tagline}</span>
         </div>
         {/* Time badge */}
         <div style={{
           position: "absolute", top: "10px", right: "12px",
-          background: "rgba(0,0,0,0.35)", backdropFilter: "blur(6px)",
+          background: "rgba(235,211,208,0.65)", backdropFilter: "blur(6px)",
           borderRadius: "3px", padding: "2px 8px",
-          border: "1px solid rgba(255,255,255,0.1)",
+          border: "0.5px solid rgba(180,140,130,0.2)",
         }}>
           <span style={{
             fontFamily: "'DM Sans', sans-serif", fontSize: "8px",
-            letterSpacing: "0.2em", textTransform: "uppercase", color: "rgba(255,255,255,0.72)",
+            letterSpacing: "0.2em", textTransform: "uppercase", color: "rgba(107,64,64,0.7)",
           }}>{fmt(hour, minute)}</span>
         </div>
         {/* NYC badge */}
         <div style={{
           position: "absolute", top: "10px", left: "12px",
-          background: "rgba(0,0,0,0.28)", backdropFilter: "blur(6px)",
+          background: "rgba(235,211,208,0.65)", backdropFilter: "blur(6px)",
           borderRadius: "3px", padding: "2px 8px",
-          border: "1px solid rgba(255,255,255,0.08)",
+          border: "0.5px solid rgba(180,140,130,0.2)",
         }}>
           <span style={{
             fontFamily: "'DM Sans', sans-serif", fontSize: "8px",
-            letterSpacing: "0.24em", textTransform: "uppercase", color: "rgba(255,255,255,0.55)",
+            letterSpacing: "0.24em", textTransform: "uppercase", color: "rgba(107,64,64,0.55)",
           }}>NYC</span>
         </div>
       </div>
@@ -597,128 +569,199 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
 //  Gallery Modal
 // ─────────────────────────────────────────────
 function GalleryModal({ hood, onClose }: { hood: Hood; onClose: () => void }) {
-  const allPaths = getNeighborhoodPhotos(hood.id); // up to 20 candidate paths
-  // Track which indices returned 404 — those are hidden from the grid and lightbox.
+  const allPaths = getNeighborhoodPhotos(hood.id);
   const [hiddenSet, setHiddenSet] = useState<Set<number>>(new Set());
-  const [lightbox, setLightbox] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number>(0);
+  const [transitioning, setTransitioning] = useState(false);
 
   const hideSlot = (i: number) =>
     setHiddenSet(prev => new Set([...prev, i]));
 
-  // Visible = all paths that haven't 404'd yet
   const visiblePhotos = allPaths
     .map((src, i) => ({ src, i }))
     .filter(({ i }) => !hiddenSet.has(i));
 
   const total = visiblePhotos.length;
 
-  // Close lightbox if the currently-open photo just 404'd
   useEffect(() => {
-    if (lightbox !== null && lightbox >= total) setLightbox(null);
-  }, [total, lightbox]);
+    if (selected >= total && total > 0) setSelected(total - 1);
+  }, [total, selected]);
+
+  const goTo = (idx: number) => {
+    if (idx === selected) return;
+    setTransitioning(true);
+    setTimeout(() => { setSelected(idx); setTransitioning(false); }, 150);
+  };
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { if (lightbox !== null) setLightbox(null); else onClose(); }
-      if (e.key === "ArrowRight" && lightbox !== null) setLightbox((lightbox + 1) % Math.max(total, 1));
-      if (e.key === "ArrowLeft" && lightbox !== null) setLightbox((lightbox - 1 + Math.max(total, 1)) % Math.max(total, 1));
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight" && total > 1) goTo((selected + 1) % total);
+      if (e.key === "ArrowLeft" && total > 1) goTo((selected - 1 + total) % total);
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [lightbox, onClose, total]);
+  }, [selected, onClose, total]);
+
+  const currentPhoto = visiblePhotos[selected];
 
   return (
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 300,
-        background: "rgba(4,6,18,0.95)", backdropFilter: "blur(8px)",
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 300,
+      display: "flex", animation: "fadeIn 0.26s ease both",
+    }}>
+      {/* Reuse site background */}
+      <ShaderBackground />
+
+      {/* ── Back button ── */}
+      <button
+        onClick={onClose}
+        style={{
+          position: "fixed", top: "20px", left: "20px", zIndex: 400,
+          background: "rgba(235,211,208,0.7)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          borderRadius: "100px", padding: "8px 16px",
+          fontSize: "0.75rem", color: "#5a3535",
+          border: "0.5px solid rgba(107,64,64,0.2)",
+          cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+          transition: "background 0.2s",
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = "rgba(235,211,208,0.9)")}
+        onMouseLeave={e => (e.currentTarget.style.background = "rgba(235,211,208,0.7)")}>
+        ← Back
+      </button>
+
+      {/* ── Left panel — thumbnail grid ── */}
+      <div style={{
+        width: "30%", flexShrink: 0,
+        background: "rgba(235,211,208,0.6)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+        padding: "24px 16px",
+        overflowY: "auto", height: "100vh",
         display: "flex", flexDirection: "column",
-        animation: "fadeIn 0.26s ease both",
-      }}
-      onClick={lightbox !== null ? () => setLightbox(null) : undefined}
-    >
-      {/* Header */}
-      <div style={{ padding: "28px 36px 20px", borderBottom: `1px solid ${hood.accent}44`, flexShrink: 0 }}
-        onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <h2 style={{
-              fontFamily: "'Cormorant Garamond', serif", fontSize: "2.1rem", fontWeight: 300,
-              color: "rgba(235,228,215,0.96)", letterSpacing: "-0.01em", lineHeight: 1.1, margin: 0,
-            }}>{hood.name}</h2>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "8px", letterSpacing: "0.28em", textTransform: "uppercase", color: "rgba(200,190,175,0.45)", marginTop: "6px" }}>
-              {hood.mood} · {hood.borough} · {total} photos
-            </p>
-            <div style={{ marginTop: "10px", height: "1px", background: hood.accent, opacity: 0.4 }} />
-          </div>
-          <button onClick={onClose} style={{
-            background: "none", border: "1px solid rgba(255,255,255,0.14)",
-            color: "rgba(255,255,255,0.5)", cursor: "pointer", borderRadius: "3px",
-            padding: "6px 14px", fontFamily: "'DM Sans', sans-serif", fontSize: "8px",
-            letterSpacing: "0.22em", textTransform: "uppercase", transition: "color 0.2s",
-          }}
-            onMouseEnter={e => (e.currentTarget.style.color = "rgba(255,255,255,0.9)")}
-            onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.5)")}>
-            ESC ×
-          </button>
+        position: "relative", zIndex: 1,
+      }}>
+        <div style={{ paddingTop: "52px", marginBottom: "0" }}>
+          <h2 style={{
+            fontFamily: "'Cormorant Garamond', serif", fontSize: "1.8rem", fontWeight: 300,
+            color: "#471F1F", marginBottom: "4px", lineHeight: 1.1,
+          }}>{hood.name}</h2>
+          <p style={{
+            fontFamily: "'DM Sans', sans-serif", fontSize: "0.6rem", letterSpacing: "0.12em",
+            textTransform: "uppercase", color: "rgba(107,64,64,0.5)",
+          }}>
+            {hood.borough} · {total} PHOTOGRAPHS · {hood.mood}
+          </p>
+          <div style={{ height: "0.5px", background: "rgba(107,64,64,0.15)", margin: "16px 0" }} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
+          {visiblePhotos.map(({ src, i }, gridPos) => (
+            <img
+              key={i}
+              src={src}
+              alt=""
+              onError={() => hideSlot(i)}
+              onClick={() => goTo(gridPos)}
+              style={{
+                aspectRatio: "1",
+                objectFit: "cover",
+                borderRadius: "6px",
+                cursor: "pointer",
+                width: "100%",
+                display: "block",
+                border: gridPos === selected ? "1.5px solid #8F1F17" : "1.5px solid transparent",
+                boxShadow: gridPos === selected ? "0 0 0 1px rgba(143,31,23,0.2)" : "none",
+                opacity: gridPos === selected ? 1 : 0.75,
+                transition: "all 0.2s ease",
+                animation: `fadeIn 0.3s ease ${gridPos * 0.05}s both`,
+              }}
+              onMouseEnter={e => {
+                if (gridPos !== selected) {
+                  e.currentTarget.style.opacity = "1";
+                  e.currentTarget.style.borderColor = "rgba(143,31,23,0.3)";
+                  e.currentTarget.style.transform = "scale(1.03)";
+                }
+              }}
+              onMouseLeave={e => {
+                if (gridPos !== selected) {
+                  e.currentTarget.style.opacity = "0.75";
+                  e.currentTarget.style.borderColor = "transparent";
+                  e.currentTarget.style.transform = "scale(1)";
+                }
+              }}
+            />
+          ))}
         </div>
       </div>
 
-      {lightbox === null ? (
-        <div style={{
-          flex: 1, overflowY: "auto", padding: "20px 36px",
-          display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "5px", alignContent: "start",
-        }} onClick={e => e.stopPropagation()}>
-          {visiblePhotos.map(({ src, i }, gridPos) => (
-            <div key={i} onClick={() => setLightbox(gridPos)}
-              style={{ position: "relative", aspectRatio: "3/2", overflow: "hidden", cursor: "pointer" }}
-              onMouseEnter={e => {
-                (e.currentTarget.querySelector("img") as HTMLElement).style.transform = "scale(1.04)";
-                (e.currentTarget.querySelector(".scrim") as HTMLElement).style.opacity = "1";
-                (e.currentTarget.querySelector(".badge") as HTMLElement).style.opacity = "1";
+      {/* ── Right panel — large photo ── */}
+      <div style={{
+        flex: 1,
+        background: "rgba(245,237,232,0.4)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        position: "relative", zIndex: 1,
+      }}>
+        {currentPhoto && (
+          <>
+            <img
+              src={currentPhoto.src}
+              alt=""
+              onError={() => hideSlot(currentPhoto.i)}
+              style={{
+                maxWidth: "85%", maxHeight: "80vh",
+                objectFit: "contain",
+                borderRadius: "8px",
+                display: "block",
+                opacity: transitioning ? 0 : 1,
+                transform: transitioning ? "scale(0.98)" : "scale(1)",
+                transition: "opacity 0.25s ease, transform 0.25s ease",
               }}
-              onMouseLeave={e => {
-                (e.currentTarget.querySelector("img") as HTMLElement).style.transform = "scale(1)";
-                (e.currentTarget.querySelector(".scrim") as HTMLElement).style.opacity = "0";
-                (e.currentTarget.querySelector(".badge") as HTMLElement).style.opacity = "0";
-              }}>
-              <img src={src} alt=""
-                onError={() => hideSlot(i)}
-                style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.3s ease", display: "block" }} />
-              <div className="scrim" style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.42)", opacity: 0, transition: "opacity 0.2s" }} />
-              <div className="badge" style={{
-                position: "absolute", bottom: "8px", right: "8px",
-                background: "rgba(0,0,0,0.65)", borderRadius: "2px", padding: "2px 7px",
-                opacity: 0, transition: "opacity 0.2s",
-                fontFamily: "'DM Sans', sans-serif", fontSize: "7px",
-                letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(255,255,255,0.8)",
-              }}>{gridPos + 1}/{total}</div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px 60px" }}>
-          <div style={{ position: "relative", maxWidth: "880px", width: "100%" }}>
-            <img src={visiblePhotos[lightbox]?.src} alt=""
-              onError={() => hideSlot(visiblePhotos[lightbox]?.i)}
-              style={{ width: "100%", maxHeight: "calc(100vh - 240px)", objectFit: "contain", display: "block", cursor: "pointer" }}
-              onClick={() => setLightbox(null)} />
-            {total > 1 && (
-              <>
-                <button onClick={e => { e.stopPropagation(); setLightbox((lightbox - 1 + total) % total); }}
-                  style={{ position: "absolute", left: "-52px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: "22px", transition: "color 0.2s" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "rgba(255,255,255,0.9)")}
-                  onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.5)")}>←</button>
-                <button onClick={e => { e.stopPropagation(); setLightbox((lightbox + 1) % total); }}
-                  style={{ position: "absolute", right: "-52px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: "22px", transition: "color 0.2s" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "rgba(255,255,255,0.9)")}
-                  onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.5)")}>→</button>
-              </>
-            )}
-          </div>
-          <p style={{ marginTop: "5px", fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(180,170,155,0.3)" }}>{lightbox + 1} / {total} — click photo to return</p>
-        </div>
-      )}
+            />
+            <p style={{
+              marginTop: "16px",
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "0.7rem",
+              color: "rgba(107,64,64,0.5)",
+              fontStyle: "italic",
+              textAlign: "center",
+            }}>
+              {selected + 1} / {total}
+            </p>
+          </>
+        )}
+
+        {total > 1 && (
+          <>
+            <button
+              onClick={() => goTo((selected - 1 + total) % total)}
+              style={{
+                position: "absolute", left: "20px", top: "50%", transform: "translateY(-50%)",
+                background: "rgba(18,12,6,0.4)", border: "none", borderRadius: "50%",
+                width: "40px", height: "40px", color: "#f5e6c8",
+                cursor: "pointer", fontSize: "16px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.2s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(18,12,6,0.7)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "rgba(18,12,6,0.4)")}>
+              ←
+            </button>
+            <button
+              onClick={() => goTo((selected + 1) % total)}
+              style={{
+                position: "absolute", right: "20px", top: "50%", transform: "translateY(-50%)",
+                background: "rgba(18,12,6,0.4)", border: "none", borderRadius: "50%",
+                width: "40px", height: "40px", color: "#f5e6c8",
+                cursor: "pointer", fontSize: "16px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.2s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(18,12,6,0.7)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "rgba(18,12,6,0.4)")}>
+              →
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -731,20 +774,49 @@ export default function App() {
   const [now, setNow] = useState(new Date());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [galleryId, setGalleryId] = useState<string | null>(null);
+  const [floatingCard, setFloatingCard] = useState<{ id: string; x: number; y: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setActiveId(null); setFloatingCard(null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const h = now.getHours(), m = now.getMinutes();
   const phase = getPhase(h, m);
   const prog = pct(h, m);
 
-  const activeHood = HOODS.find(n => n.id === activeId) ?? null;
   const galleryHood = HOODS.find(n => n.id === galleryId) ?? null;
 
-  const handleSelect = (id: string) => setActiveId(prev => prev === id ? null : id);
+  const handleSelect = (id: string, x: number, y: number) => {
+    if (activeId === id) { setActiveId(null); setFloatingCard(null); return; }
+    setActiveId(id);
+    setFloatingCard({ id, x, y });
+  };
+
+  const handleDeselect = () => { setActiveId(null); setFloatingCard(null); };
+
+  const handlePanelSelect = (id: string) => {
+    if (activeId === id) { setActiveId(null); setFloatingCard(null); return; }
+    setActiveId(id);
+    if (svgRef.current) {
+      const hood = HOODS.find(h => h.id === id);
+      if (hood) {
+        const rect = svgRef.current.getBoundingClientRect();
+        const screenX = ((hood.labelX - 18) / 384) * rect.width + rect.left;
+        const screenY = ((hood.labelY - 70) / 480) * rect.height + rect.top;
+        setFloatingCard({ id, x: screenX, y: screenY });
+      }
+    }
+  };
 
   return (
     <>
@@ -806,7 +878,7 @@ export default function App() {
           onClick={() => navigate("/")}
           style={{
             background: "none", border: "none", cursor: "pointer", padding: 0,
-            fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.1rem",
+            fontFamily: "'Playfair Display', serif", fontSize: "36px",
             fontStyle: "italic", color: "#6b4040", letterSpacing: "-0.02em",
           }}
         >CityMood</button>
@@ -843,10 +915,10 @@ export default function App() {
               · {phase.label} — New York City
             </p>
             <h1 style={{
-              fontFamily: "'Cormorant Garamond', serif", fontSize: "2.6rem", fontWeight: 300,
+              fontFamily: "'Cormorant Garamond', serif", fontSize: "2.2rem", fontWeight: 300,
               color: "#5a3535", letterSpacing: "-0.01em", lineHeight: 1.12,
-              textShadow: "0 2px 24px rgba(0,0,0,0.1)",
-            }}>New York<br />City</h1>
+              textShadow: "0 2px 24px rgba(0,0,0,0.1)", whiteSpace: "nowrap",
+            }}>New York City</h1>
             <p style={{
               marginTop: "14px", fontFamily: "'DM Sans', sans-serif", fontSize: "11px",
               lineHeight: 1.9, letterSpacing: "0.06em", color: "rgba(107,64,64,0.6)",
@@ -860,7 +932,7 @@ export default function App() {
 
           {/* Light Tracker */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.28em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: "12px" }}>Light Tracker</p>
+            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(107,64,64,0.65)", marginBottom: "12px", fontWeight: 500 }}>Light Tracker</p>
             <LightTracker phase={phase} prog={prog} hour={h} minute={m} />
           </div>
 
@@ -868,46 +940,41 @@ export default function App() {
 
           {/* Districts list */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.28em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: "6px" }}>Districts</p>
+            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(107,64,64,0.65)", marginBottom: "12px", fontWeight: 500 }}>Districts</p>
             <ul style={{ listStyle: "none" }}>
               {HOODS.map(hood => {
                 const isActive = activeId === hood.id;
                 return (
-                  <li key={hood.id} style={{ borderBottom: "1px solid rgba(107,64,64,0.08)" }}>
+                  <li key={hood.id}>
                     <button
-                      onClick={() => handleSelect(hood.id)}
+                      onClick={() => handlePanelSelect(hood.id)}
                       style={{
-                        width: "100%", background: "none", border: "none", cursor: "pointer",
+                        width: "100%", background: isActive ? "rgba(143,31,23,0.06)" : "none",
+                        border: isActive ? "0.5px solid rgba(143,31,23,0.12)" : "0.5px solid transparent",
+                        borderRadius: "8px", cursor: "pointer",
                         display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "9px 0", transition: "opacity 0.2s",
+                        padding: "10px 14px", transition: "all 0.2s ease",
                       }}
-                      onMouseEnter={e => (e.currentTarget.style.opacity = "0.82")}
-                      onMouseLeave={e => (e.currentTarget.style.opacity = "1")}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div style={{
-                          width: "5px", height: "5px", borderRadius: "50%",
-                          background: isActive ? "#DD9389" : "rgba(107,64,64,0.3)", opacity: isActive ? 1 : 0.6,
-                          boxShadow: isActive ? "0 0 8px rgba(221,147,137,0.6)" : "none",
-                          transition: "all 0.3s",
-                        }} />
-                        <span style={{
-                          fontFamily: "'Cormorant Garamond', serif", fontSize: "1rem", fontWeight: 300,
-                          color: isActive ? "#5a3535" : "rgba(107,64,64,0.6)",
-                          transition: "color 0.2s",
-                        }}>{hood.name}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "2px" }}>
-                        <span style={{
-                          fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.18em",
-                          textTransform: "uppercase",
-                          color: isActive ? "#DD9389" : "rgba(107,64,64,0.4)",
-                          transition: "color 0.2s",
-                        }}>{hood.mood}</span>
-                        <span style={{
-                          fontFamily: "'DM Sans', sans-serif", fontSize: "6.5px", letterSpacing: "0.15em",
-                          textTransform: "uppercase", color: "rgba(107,64,64,0.35)",
-                        }}>{hood.photos.length} photos</span>
-                      </div>
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = "rgba(143,31,23,0.06)";
+                        e.currentTarget.style.border = "0.5px solid rgba(143,31,23,0.12)";
+                        (e.currentTarget.querySelector(".hood-name") as HTMLElement).style.fontStyle = "italic";
+                      }}
+                      onMouseLeave={e => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = "none";
+                          e.currentTarget.style.border = "0.5px solid transparent";
+                        }
+                        (e.currentTarget.querySelector(".hood-name") as HTMLElement).style.fontStyle = "normal";
+                      }}>
+                      <span className="hood-name" style={{
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem",
+                        color: "#5a3535", transition: "font-style 0.2s",
+                      }}>{hood.name}</span>
+                      <span style={{
+                        fontFamily: "'DM Sans', sans-serif", fontSize: "0.62rem", letterSpacing: "0.06em",
+                        textTransform: "uppercase", color: "rgba(107,64,64,0.45)",
+                      }}>{hood.photos.length} photos</span>
                     </button>
                   </li>
                 );
@@ -919,7 +986,7 @@ export default function App() {
 
           {/* Coordinates */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.28em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: "5px" }}>Coordinates</p>
+            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(107,64,64,0.65)", marginBottom: "12px", fontWeight: 500 }}>Coordinates</p>
             <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "1.05rem", fontWeight: 300, color: "rgba(107,64,64,0.6)", letterSpacing: "0.04em" }}>40.7128° N · 74.0060° W</p>
           </div>
         </div>
@@ -927,63 +994,56 @@ export default function App() {
         {/* ── RIGHT MAP PANEL ── */}
         <div style={{ width: "70%", flexShrink: 0, position: "relative", overflow: "hidden" }}>
           <div style={{ position: "absolute", inset: 0 }}>
-            <NYCMap activeId={activeId} onSelect={handleSelect} onExplore={id => setGalleryId(id)} />
+            <NYCMap activeId={activeId} onSelect={handleSelect} onDeselect={handleDeselect} onExplore={id => setGalleryId(id)} svgRef={svgRef} />
           </div>
 
-          {/* Active hood info card */}
-          {activeHood && (
-            <div key={activeHood.id} style={{
-              position: "absolute", bottom: "28px", left: "28px", maxWidth: "248px",
-              background: "rgba(235,211,208,0.82)", backdropFilter: "blur(14px)",
-              border: "0.5px solid rgba(180,140,130,0.25)",
-              borderRadius: "8px", padding: "16px 18px",
-              animation: "slideUp 0.26s ease both",
-              boxShadow: "0 8px 32px rgba(107,64,64,0.12), 0 0 0 1px rgba(180,140,130,0.1)",
-            }}>
-              <div style={{ width: "22px", height: "1.5px", background: "#DD9389", marginBottom: "11px", opacity: 0.8 }} />
-              <h3 style={{
-                fontFamily: "'Cormorant Garamond', serif", fontSize: "1.25rem", fontWeight: 300,
-                color: "#5a3535", letterSpacing: "-0.01em", lineHeight: 1.15, marginBottom: "3px",
-              }}>{activeHood.name}</h3>
-              <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7.5px", letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: "10px" }}>
-                {activeHood.borough} · {activeHood.mood}
-              </p>
-              {/* Energy dots */}
-              <div style={{ display: "flex", gap: "3px", marginBottom: "14px" }}>
-                {[...Array(10)].map((_, i) => (
-                  <div key={i} style={{
-                    width: "13px", height: "2.5px", borderRadius: "1px",
-                    background: i < activeHood.energy ? "#DD9389" : "rgba(107,64,64,0.1)",
-                    transition: "background 0.3s",
-                  }} />
-                ))}
+          {/* Floating card near clicked block */}
+          {floatingCard && (() => {
+            const fh = HOODS.find(n => n.id === floatingCard.id);
+            if (!fh) return null;
+            const showLeft = floatingCard.x > window.innerWidth * 0.65;
+            const shiftUp = floatingCard.y > window.innerHeight * 0.7;
+            return (
+              <div key={fh.id} style={{
+                position: "fixed",
+                left: showLeft ? floatingCard.x - 20 : floatingCard.x + 20,
+                top: shiftUp ? floatingCard.y - 20 : floatingCard.y,
+                transform: `translate(${showLeft ? "-100%" : "0"}, ${shiftUp ? "-100%" : "0"})`,
+                zIndex: 50,
+                background: "rgba(18,12,6,0.88)",
+                backdropFilter: "blur(16px)",
+                WebkitBackdropFilter: "blur(16px)",
+                borderRadius: "12px",
+                border: "0.5px solid rgba(255,255,255,0.08)",
+                padding: "20px 22px",
+                minWidth: "200px",
+                maxWidth: "240px",
+                pointerEvents: "auto",
+                animation: "fadeIn 0.2s ease",
+              }}>
+                <div style={{ width: "24px", height: "2px", background: "#DD9389", marginBottom: "12px" }} />
+                <div style={{ fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(245,230,200,0.4)", marginBottom: "4px", fontFamily: "'DM Sans', sans-serif" }}>{fh.borough}</div>
+                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.2rem", color: "#f5e6c8", marginBottom: "4px" }}>{fh.name}</div>
+                <div style={{ fontSize: "0.58rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(245,230,200,0.35)", marginBottom: "16px", fontFamily: "'DM Sans', sans-serif" }}>{fh.mood}</div>
+                <button
+                  onClick={() => setGalleryId(fh.id)}
+                  style={{
+                    width: "100%", padding: "9px 0",
+                    border: "0.5px solid rgba(245,230,200,0.2)",
+                    borderRadius: "6px",
+                    color: "rgba(245,230,200,0.7)",
+                    fontSize: "0.7rem", letterSpacing: "0.08em", textTransform: "uppercase",
+                    background: "transparent", cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.06)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                  VIEW GALLERY →
+                </button>
               </div>
-              <button
-                onClick={() => setGalleryId(activeHood.id)}
-                style={{
-                  width: "100%", background: "none",
-                  border: "1px solid rgba(221,147,137,0.4)",
-                  color: "#DD9389", padding: "7px 0", borderRadius: "3px",
-                  cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                  fontSize: "7.5px", letterSpacing: "0.24em", textTransform: "uppercase",
-                  transition: "background 0.2s",
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = "rgba(221,147,137,0.12)")}
-                onMouseLeave={e => (e.currentTarget.style.background = "none")}>
-                View Gallery →
-              </button>
-            </div>
-          )}
-
-          {/* Hint when nothing selected */}
-          {!activeId && (
-            <div style={{
-              position: "absolute", bottom: "28px", left: "28px",
-              fontFamily: "'DM Sans', sans-serif", fontSize: "7px",
-              letterSpacing: "0.22em", textTransform: "uppercase",
-              color: "rgba(160,148,190,0.45)",
-            }}>Click a district to explore</div>
-          )}
+            );
+          })()}
         </div>
       </div>
 
