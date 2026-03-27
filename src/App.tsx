@@ -361,8 +361,8 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
 
         {/* Water gradient */}
         <linearGradient id="waterGrad" x1="0" y1="0" x2="0.5" y2="1">
-          <stop offset="0%" stopColor="rgb(180,130,60)" stopOpacity={0.15} />
-          <stop offset="100%" stopColor="rgb(160,110,50)" stopOpacity={0.2} />
+          <stop offset="0%" stopColor="rgb(160,115,55)" stopOpacity={0.22} />
+          <stop offset="100%" stopColor="rgb(140,95,42)" stopOpacity={0.32} />
         </linearGradient>
         <linearGradient id="landGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="rgb(210,160,80)" stopOpacity={0.35} />
@@ -380,15 +380,15 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
       ))}
 
       {/* ── Queens (bg land) ── */}
-      <path d={queensOutline} fill="rgba(210,160,80,0.25)"
-        stroke="rgba(180,130,60,0.2)" strokeWidth={0.5} />
+      <path d={queensOutline} fill="rgba(210,160,80,0.28)"
+        stroke="rgba(180,130,60,0.18)" strokeWidth={0.35} />
 
       {/* ── Brooklyn land ── */}
       <path d={brooklynOutline} fill="url(#landGrad)"
-        stroke="rgba(180,130,60,0.3)" strokeWidth={0.6} />
+        stroke="rgba(180,130,60,0.22)" strokeWidth={0.4} />
       {/* Brooklyn shoreline glow */}
       <path d={brooklynOutline} fill="none"
-        stroke="rgba(200,150,70,0.3)" strokeWidth={3}
+        stroke="rgba(200,150,70,0.22)" strokeWidth={3}
         filter="url(#fShoreGlow)" />
 
       {/* ── Manhattan land ── */}
@@ -398,20 +398,20 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
       {/* ── Manhattan shoreline — double stroke ── */}
       {/* Outer glow */}
       <path d={manhattanOutline} fill="none"
-        stroke="rgba(200,150,70,0.2)" strokeWidth={5}
+        stroke="rgba(200,150,70,0.18)" strokeWidth={5}
         filter="url(#fShoreGlow)" />
       {/* Precise inner line */}
       <path d={manhattanOutline} fill="none"
-        stroke="rgba(180,130,60,0.5)" strokeWidth={0.85} />
+        stroke="rgba(180,130,60,0.45)" strokeWidth={0.6} />
 
       {/* ── Neighborhood zones — line art ── */}
       {HOODS.map((hood) => {
         const isActive = activeId === hood.id;
         const isHovered = hovered === hood.id;
 
-        const fill   = isActive ? "rgba(13,35,124,0.2)" : isHovered ? "rgba(217,160,144,0.22)" : "rgba(217,160,144,0.1)";
-        const stroke = isActive ? "rgba(13,35,124,0.65)" : isHovered ? "rgba(143,31,23,0.45)" : "rgba(143,31,23,0.2)";
-        const sw     = isActive ? 1.8 : isHovered ? 1.2 : 0.8;
+        const fill   = isActive ? "rgba(13,35,124,0.14)" : isHovered ? "rgba(217,160,144,0.18)" : "rgba(217,160,144,0.07)";
+        const stroke = isActive ? "rgba(13,35,124,0.48)" : isHovered ? "rgba(143,31,23,0.38)" : "rgba(143,31,23,0.17)";
+        const sw     = isActive ? 1.1 : isHovered ? 0.7 : 0.42;
         return (
           <g key={hood.id}>
             <path d={hood.path} fill={fill} style={{ transition: "fill 0.25s", pointerEvents: "none" }} />
@@ -501,7 +501,7 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
             transition: "color 2s ease",
           }}>{phase.label}</span>
           <span style={{
-            fontFamily: "'Cormorant Garamond', serif", fontSize: "11px", fontWeight: 300, fontStyle: "italic",
+            fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", fontWeight: 400, fontStyle: "italic",
             color: phase.textColor, opacity: 0.72, letterSpacing: "0.04em",
             transition: "color 2s ease",
           }}>{phase.tagline}</span>
@@ -514,8 +514,9 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
           border: "0.5px solid rgba(180,140,130,0.2)",
         }}>
           <span style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: "8px",
+            fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem",
             letterSpacing: "0.2em", textTransform: "uppercase", color: "rgba(107,64,64,0.7)",
+            fontWeight: 400,
           }}>{fmt(hour, minute)}</span>
         </div>
         {/* NYC badge */}
@@ -526,8 +527,9 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
           border: "0.5px solid rgba(180,140,130,0.2)",
         }}>
           <span style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: "8px",
+            fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem",
             letterSpacing: "0.24em", textTransform: "uppercase", color: "rgba(107,64,64,0.55)",
+            fontWeight: 400,
           }}>NYC</span>
         </div>
       </div>
@@ -535,8 +537,8 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
       {/* Progress strip */}
       <div style={{ padding: "12px 16px", background: "rgba(235,211,208,0.6)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.24em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)" }}>Day Progress</span>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)" }}>{Math.round(prog * 100)}%</span>
+          <span style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.24em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", fontWeight: 400 }}>Day Progress</span>
+          <span style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", fontWeight: 400 }}>{Math.round(prog * 100)}%</span>
         </div>
         <div style={{ position: "relative", height: "3px", borderRadius: "2px", background: "rgba(180,140,130,0.2)", overflow: "visible" }}>
           <div style={{
@@ -557,7 +559,7 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
           {["midnight","dawn","noon","dusk","night"].map(l => (
-            <span key={l} style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "6px", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(107,64,64,0.3)" }}>{l}</span>
+            <span key={l} style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(107,64,64,0.3)", fontWeight: 400 }}>{l}</span>
           ))}
         </div>
       </div>
@@ -572,7 +574,8 @@ function GalleryModal({ hood, onClose }: { hood: Hood; onClose: () => void }) {
   const allPaths = getNeighborhoodPhotos(hood.id);
   const [hiddenSet, setHiddenSet] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<number>(0);
-  const [transitioning, setTransitioning] = useState(false);
+  const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const hideSlot = (i: number) =>
     setHiddenSet(prev => new Set([...prev, i]));
@@ -587,23 +590,35 @@ function GalleryModal({ hood, onClose }: { hood: Hood; onClose: () => void }) {
     if (selected >= total && total > 0) setSelected(total - 1);
   }, [total, selected]);
 
-  const goTo = (idx: number) => {
-    if (idx === selected) return;
-    setTransitioning(true);
-    setTimeout(() => { setSelected(idx); setTransitioning(false); }, 150);
+  // Scroll right panel to photo when thumbnail is clicked
+  const scrollToPhoto = (gridPos: number) => {
+    setSelected(gridPos);
+    photoRefs.current[gridPos]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  // Keep thumbnail highlight in sync as user scrolls
   useEffect(() => {
-    const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowRight" && total > 1) goTo((selected + 1) % total);
-      if (e.key === "ArrowLeft" && total > 1) goTo((selected - 1 + total) % total);
-    };
+    const root = scrollRef.current;
+    if (!root) return;
+    const observers: IntersectionObserver[] = [];
+    visiblePhotos.forEach(({ }, gridPos) => {
+      const el = photoRefs.current[gridPos];
+      if (!el) return;
+      const obs = new IntersectionObserver(
+        ([entry]) => { if (entry.isIntersecting) setSelected(gridPos); },
+        { root, threshold: 0.35 }
+      );
+      obs.observe(el);
+      observers.push(obs);
+    });
+    return () => observers.forEach(o => o.disconnect());
+  }, [total, hiddenSet]);
+
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [selected, onClose, total]);
-
-  const currentPhoto = visiblePhotos[selected];
+  }, [onClose]);
 
   return (
     <div style={{
@@ -660,7 +675,7 @@ function GalleryModal({ hood, onClose }: { hood: Hood; onClose: () => void }) {
               src={src}
               alt=""
               onError={() => hideSlot(i)}
-              onClick={() => goTo(gridPos)}
+              onClick={() => scrollToPhoto(gridPos)}
               style={{
                 aspectRatio: "1",
                 objectFit: "cover",
@@ -693,74 +708,39 @@ function GalleryModal({ hood, onClose }: { hood: Hood; onClose: () => void }) {
         </div>
       </div>
 
-      {/* ── Right panel — large photo ── */}
-      <div style={{
-        flex: 1,
-        background: "rgba(245,237,232,0.4)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        position: "relative", zIndex: 1,
-      }}>
-        {currentPhoto && (
-          <>
-            <img
-              src={currentPhoto.src}
-              alt=""
-              onError={() => hideSlot(currentPhoto.i)}
+      {/* ── Right panel — vertical scroll feed ── */}
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          background: "rgba(245,237,232,0.4)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          overflowY: "auto", height: "100vh",
+          position: "relative", zIndex: 1,
+        }}
+      >
+        <div style={{ padding: "48px 48px 80px" }}>
+          {visiblePhotos.map(({ src, i }, gridPos) => (
+            <div
+              key={i}
+              ref={el => { photoRefs.current[gridPos] = el; }}
               style={{
-                maxWidth: "85%", maxHeight: "80vh",
-                objectFit: "contain",
-                borderRadius: "8px",
-                display: "block",
-                opacity: transitioning ? 0 : 1,
-                transform: transitioning ? "scale(0.98)" : "scale(1)",
-                transition: "opacity 0.25s ease, transform 0.25s ease",
+                marginBottom: "48px",
+                animation: `fadeIn 0.4s ease ${gridPos * 0.07}s both`,
               }}
-            />
-            <p style={{
-              marginTop: "16px",
-              fontFamily: "'Cormorant Garamond', serif",
-              fontSize: "0.7rem",
-              color: "rgba(107,64,64,0.5)",
-              fontStyle: "italic",
-              textAlign: "center",
-            }}>
-              {selected + 1} / {total}
-            </p>
-          </>
-        )}
-
-        {total > 1 && (
-          <>
-            <button
-              onClick={() => goTo((selected - 1 + total) % total)}
-              style={{
-                position: "absolute", left: "20px", top: "50%", transform: "translateY(-50%)",
-                background: "rgba(18,12,6,0.4)", border: "none", borderRadius: "50%",
-                width: "40px", height: "40px", color: "#f5e6c8",
-                cursor: "pointer", fontSize: "16px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "background 0.2s",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = "rgba(18,12,6,0.7)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "rgba(18,12,6,0.4)")}>
-              ←
-            </button>
-            <button
-              onClick={() => goTo((selected + 1) % total)}
-              style={{
-                position: "absolute", right: "20px", top: "50%", transform: "translateY(-50%)",
-                background: "rgba(18,12,6,0.4)", border: "none", borderRadius: "50%",
-                width: "40px", height: "40px", color: "#f5e6c8",
-                cursor: "pointer", fontSize: "16px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "background 0.2s",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = "rgba(18,12,6,0.7)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "rgba(18,12,6,0.4)")}>
-              →
-            </button>
-          </>
-        )}
+            >
+              <img
+                src={src}
+                alt=""
+                onError={() => hideSlot(i)}
+                style={{
+                  width: "100%",
+                  display: "block",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -821,7 +801,7 @@ export default function App() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400&family=Playfair+Display:ital,wght@0,400;1,400&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Cormorant+SC:wght@300;400&family=DM+Sans:wght@300;400&family=DM+Serif+Text:ital@0;1&family=Playfair+Display:ital,wght@0,400;1,400&display=swap');
 
         @keyframes skyDrift {
           0%   { background-position: 0% 60%; }
@@ -856,6 +836,14 @@ export default function App() {
         .lt-text    { animation: floatText 7s ease-in-out infinite; }
         .lt-horizon { animation: horizonPulse 6s ease-in-out infinite; }
 
+        .district-btn {
+          transition: background 0.4s cubic-bezier(0.25,0.46,0.45,0.94),
+                      border-left-color 0.4s cubic-bezier(0.25,0.46,0.45,0.94);
+        }
+        .district-btn .hood-name {
+          transition: font-style 0.35s ease, padding-left 0.35s ease, color 0.35s ease;
+        }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; overflow: hidden; }
       `}</style>
@@ -868,60 +856,76 @@ export default function App() {
 
       {/* ── Nav (z:100) ── */}
       <nav style={{
-        position: "fixed", top: 0, left: 0, right: 0, height: "54px", zIndex: 100,
-        background: "rgba(235,211,208,0.75)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-        borderBottom: "0.5px solid rgba(180,140,130,0.15)",
+        position: "fixed", top: 0, left: 0, right: 0, height: "58px", zIndex: 100,
+        background: "rgba(240,226,218,0.88)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+        borderBottom: "1px solid rgba(107,64,64,0.1)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 32px",
+        padding: "0 36px",
       }}>
         <button
           onClick={() => navigate("/")}
           style={{
             background: "none", border: "none", cursor: "pointer", padding: 0,
-            fontFamily: "'Playfair Display', serif", fontSize: "36px",
-            fontStyle: "italic", color: "#6b4040", letterSpacing: "-0.02em",
+            fontFamily: "'Cormorant SC', 'Cormorant Garamond', serif", fontSize: "16px",
+            fontStyle: "normal", color: "#4a2e2e", letterSpacing: "0.28em",
+            fontWeight: 300,
           }}
         >CityMood</button>
-        <button
-          onClick={() => navigate("/try")}
-          style={{
-          fontFamily: "'DM Sans', sans-serif", fontSize: "0.7rem", letterSpacing: "0.1em",
-          textTransform: "uppercase", color: "rgba(107,64,64,0.6)",
-          background: "transparent", border: "0.5px solid rgba(107,64,64,0.2)",
-          borderRadius: "100px", padding: "6px 16px", cursor: "pointer", transition: "color 0.2s",
-        }}
-          onMouseEnter={e => (e.currentTarget.style.color = "rgba(107,64,64,1)")}
-          onMouseLeave={e => (e.currentTarget.style.color = "rgba(107,64,64,0.6)")}>
-          Start your map →
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "0" }}>
+          <span style={{
+            fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.22em",
+            textTransform: "uppercase", color: "rgba(107,64,64,0.28)", marginRight: "20px",
+          }}>Atlas</span>
+          <span style={{ width: "1px", height: "14px", background: "rgba(107,64,64,0.14)", marginRight: "20px", display: "inline-block" }} />
+          <button
+            onClick={() => navigate("/try")}
+            style={{
+              fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.22em",
+              textTransform: "uppercase", color: "rgba(107,64,64,0.52)",
+              background: "transparent", border: "none",
+              cursor: "pointer", transition: "color 0.3s ease", padding: 0,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.color = "rgba(107,64,64,1)")}
+            onMouseLeave={e => (e.currentTarget.style.color = "rgba(107,64,64,0.52)")}>
+            Start your map →
+          </button>
+        </div>
       </nav>
 
       {/* ── Main layout (z:2) ── */}
       <div style={{
         position: "relative", zIndex: 2,
-        display: "flex", height: "100vh", paddingTop: "54px",
+        display: "flex", height: "100vh", paddingTop: "58px",
         fontFamily: "'DM Sans', sans-serif",
       }}>
         {/* ── LEFT SIDEBAR ── */}
         <div style={{
           width: "30%", flexShrink: 0,
-          background: "transparent",
+          background: "rgba(244,232,225,0.22)",
           overflowY: "auto", padding: "36px 28px",
           display: "flex", flexDirection: "column", gap: "28px",
+          position: "relative",
         }}>
           {/* Hero */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "7.5px", letterSpacing: "0.3em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: "12px" }}>
-              · {phase.label} — New York City
+            <p style={{
+              fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em",
+              textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "20px",
+              paddingBottom: "14px", borderBottom: "0.5px solid rgba(107,64,64,0.1)",
+              fontWeight: 700,
+            }}>
+              {phase.label} — New York City
             </p>
             <h1 style={{
-              fontFamily: "'Cormorant Garamond', serif", fontSize: "2.2rem", fontWeight: 300,
-              color: "#5a3535", letterSpacing: "-0.01em", lineHeight: 1.12,
-              textShadow: "0 2px 24px rgba(0,0,0,0.1)", whiteSpace: "nowrap",
+              fontFamily: "'Cormorant Garamond', serif", fontSize: "3rem", fontWeight: 300,
+              color: "#4a2c2c", letterSpacing: "-0.025em", lineHeight: 1.0,
+              marginBottom: "22px",
             }}>New York City</h1>
             <p style={{
-              marginTop: "14px", fontFamily: "'DM Sans', sans-serif", fontSize: "11px",
-              lineHeight: 1.9, letterSpacing: "0.06em", color: "rgba(107,64,64,0.6)",
+              fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem",
+              lineHeight: 2.2, letterSpacing: "0.07em", color: "rgba(107,64,64,0.42)",
+              paddingLeft: "12px", borderLeft: "1px solid rgba(107,64,64,0.14)",
+              fontWeight: 700,
             }}>
               A personal photography atlas.<br />
               Click a district to explore.
@@ -932,7 +936,10 @@ export default function App() {
 
           {/* Light Tracker */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(107,64,64,0.65)", marginBottom: "12px", fontWeight: 500 }}>Light Tracker</p>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "12px", fontWeight: 400, display: "flex", alignItems: "center", gap: "12px" }}>
+              Light Tracker
+              <span style={{ flex: 1, height: "0.5px", background: "rgba(107,64,64,0.1)", display: "inline-block" }} />
+            </p>
             <LightTracker phase={phase} prog={prog} hour={h} minute={m} />
           </div>
 
@@ -940,41 +947,52 @@ export default function App() {
 
           {/* Districts list */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(107,64,64,0.65)", marginBottom: "12px", fontWeight: 500 }}>Districts</p>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "4px", fontWeight: 700, display: "flex", alignItems: "center", gap: "12px" }}>
+              Districts
+              <span style={{ flex: 1, height: "0.5px", background: "rgba(107,64,64,0.1)", display: "inline-block" }} />
+            </p>
             <ul style={{ listStyle: "none" }}>
-              {HOODS.map(hood => {
+              {HOODS.map((hood, idx) => {
                 const isActive = activeId === hood.id;
                 return (
                   <li key={hood.id}>
                     <button
+                      className="district-btn"
                       onClick={() => handlePanelSelect(hood.id)}
                       style={{
-                        width: "100%", background: isActive ? "rgba(143,31,23,0.06)" : "none",
-                        border: isActive ? "0.5px solid rgba(143,31,23,0.12)" : "0.5px solid transparent",
-                        borderRadius: "8px", cursor: "pointer",
+                        width: "100%",
+                        background: isActive ? "rgba(180,110,90,0.06)" : "transparent",
+                        border: "none",
+                        borderLeft: isActive ? "1.5px solid rgba(143,31,23,0.38)" : "1.5px solid transparent",
+                        borderBottom: "0.5px solid rgba(107,64,64,0.07)",
+                        borderRadius: 0,
+                        cursor: "pointer",
                         display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "10px 14px", transition: "all 0.2s ease",
+                        padding: "15px 0 15px 14px",
+                        textAlign: "left",
                       }}
                       onMouseEnter={e => {
-                        e.currentTarget.style.background = "rgba(143,31,23,0.06)";
-                        e.currentTarget.style.border = "0.5px solid rgba(143,31,23,0.12)";
-                        (e.currentTarget.querySelector(".hood-name") as HTMLElement).style.fontStyle = "italic";
+                        if (!isActive) e.currentTarget.style.background = "rgba(180,110,90,0.05)";
+                        if (!isActive) e.currentTarget.style.borderLeftColor = "rgba(143,31,23,0.18)";
+                        const n = e.currentTarget.querySelector(".hood-name") as HTMLElement;
+                        if (n) { n.style.fontStyle = "italic"; n.style.paddingLeft = "3px"; n.style.color = "#3a1e1e"; }
                       }}
                       onMouseLeave={e => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = "none";
-                          e.currentTarget.style.border = "0.5px solid transparent";
-                        }
-                        (e.currentTarget.querySelector(".hood-name") as HTMLElement).style.fontStyle = "normal";
+                        if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderLeftColor = "transparent"; }
+                        const n = e.currentTarget.querySelector(".hood-name") as HTMLElement;
+                        if (n) { n.style.fontStyle = "normal"; n.style.paddingLeft = "0"; n.style.color = isActive ? "#3a1e1e" : "#5a3535"; }
                       }}>
                       <span className="hood-name" style={{
-                        fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem",
-                        color: "#5a3535", transition: "font-style 0.2s",
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: "1.05rem", fontWeight: 300,
+                        color: isActive ? "#3a1e1e" : "#5a3535", flex: 1,
                       }}>{hood.name}</span>
-                      <span style={{
-                        fontFamily: "'DM Sans', sans-serif", fontSize: "0.62rem", letterSpacing: "0.06em",
-                        textTransform: "uppercase", color: "rgba(107,64,64,0.45)",
-                      }}>{hood.photos.length} photos</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0, marginLeft: "10px" }}>
+                        <span style={{ width: "0.5px", height: "10px", background: "rgba(107,64,64,0.14)", display: "inline-block" }} />
+                        <span style={{
+                          fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.16em",
+                          textTransform: "uppercase", color: "rgba(107,64,64,0.26)", fontWeight: 700,
+                        }}>{String(hood.photos.length).padStart(2, "0")}</span>
+                      </span>
                     </button>
                   </li>
                 );
@@ -986,8 +1004,11 @@ export default function App() {
 
           {/* Coordinates */}
           <div>
-            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(107,64,64,0.65)", marginBottom: "12px", fontWeight: 500 }}>Coordinates</p>
-            <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "1.05rem", fontWeight: 300, color: "rgba(107,64,64,0.6)", letterSpacing: "0.04em" }}>40.7128° N · 74.0060° W</p>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "12px", fontWeight: 700, display: "flex", alignItems: "center", gap: "12px" }}>
+              Coordinates
+              <span style={{ flex: 1, height: "0.5px", background: "rgba(107,64,64,0.1)", display: "inline-block" }} />
+            </p>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", fontWeight: 700, color: "rgba(107,64,64,0.6)", letterSpacing: "0.08em" }}>40.7128° N · 74.0060° W</p>
           </div>
         </div>
 

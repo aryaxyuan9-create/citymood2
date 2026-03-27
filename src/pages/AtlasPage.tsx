@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ShaderBackground from "../components/home/ShaderBackground";
+import { supabase } from "../lib/supabase";
 
 // ─────────────────────────────────────────────
 //  Types
@@ -13,8 +14,7 @@ type Hood = {
 
 type NeighborhoodMemory = {
   notes: string[];
-  photoCount: number;
-  photoBase64s: string[];
+  photoUrls: string[];
 };
 
 type AtlasData = {
@@ -342,13 +342,19 @@ export default function AtlasPage() {
 
   useEffect(() => {
     if (!id) { setNotFound(true); return; }
-    try {
-      const raw = localStorage.getItem(`citymood-map-${id}`);
-      if (!raw) { setNotFound(true); return; }
-      setData(JSON.parse(raw));
-    } catch {
-      setNotFound(true);
-    }
+    supabase
+      .from('atlases')
+      .select('id, created_at, neighborhood_data')
+      .eq('id', id)
+      .single()
+      .then(({ data: row, error }) => {
+        if (error || !row) { setNotFound(true); return; }
+        setData({
+          id: row.id,
+          createdAt: new Date(row.created_at).getTime(),
+          neighborhoods: row.neighborhood_data,
+        });
+      });
   }, [id]);
 
   if (notFound) {
@@ -382,7 +388,7 @@ export default function AtlasPage() {
 
   const mappedHoods = HOODS.filter(h => data.neighborhoods[h.id]);
   const litIds = mappedHoods.map(h => h.id);
-  const totalPhotos = mappedHoods.reduce((sum, h) => sum + (data.neighborhoods[h.id]?.photoCount ?? 0), 0);
+  const totalPhotos = mappedHoods.reduce((sum, h) => sum + (data.neighborhoods[h.id]?.photoUrls?.length ?? 0), 0);
 
   const shareUrl = `${window.location.origin}/atlas/${id}`;
 
@@ -394,12 +400,12 @@ export default function AtlasPage() {
   };
 
   const lightboxHood = lightboxHoodId ? HOODS.find(h => h.id === lightboxHoodId) : null;
-  const lightboxPhotos = lightboxHoodId ? (data.neighborhoods[lightboxHoodId]?.photoBase64s ?? []) : [];
+  const lightboxPhotos = lightboxHoodId ? (data.neighborhoods[lightboxHoodId]?.photoUrls ?? []) : [];
 
   const handleHoodSelect = (id: string) => {
     setActiveId(prev => prev === id ? null : id);
     const mem = data.neighborhoods[id];
-    if (mem?.photoBase64s?.length) {
+    if (mem?.photoUrls?.length) {
       setLightboxHoodId(id);
     }
   };
@@ -484,7 +490,7 @@ export default function AtlasPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: "0", marginBottom: "28px" }}>
             {mappedHoods.map((hood, i) => {
               const mem = data.neighborhoods[hood.id];
-              const hasPhotos = mem?.photoBase64s?.length > 0;
+              const hasPhotos = (mem?.photoUrls?.length ?? 0) > 0;
               const isActive = activeId === hood.id;
               return (
                 <div

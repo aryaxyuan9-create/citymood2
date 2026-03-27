@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ShaderBackground from "../components/home/ShaderBackground";
+import { supabase } from "../lib/supabase";
 
 // ─────────────────────────────────────────────
 //  Neighborhood data
@@ -208,6 +209,7 @@ export default function TryPage() {
   const navigate = useNavigate();
 
   // ── State (per spec) ──
+  const [atlasId]                           = useState<string>(() => crypto.randomUUID());
   const [memories, setMemories]             = useState<MemoryStore>(loadDraft);
   const [selectedSlug, setSelectedSlug]     = useState<string | null>(null);
   const [showPanel, setShowPanel]           = useState(false);
@@ -217,6 +219,9 @@ export default function TryPage() {
   const [currentPhotos, setCurrentPhotos]   = useState<string[]>([]);
   const [currentNotes, setCurrentNotes]     = useState<string[]>([]);
   const [dragOver, setDragOver]             = useState(false);
+  const [uploading, setUploading]           = useState(false);
+  const [finishing, setFinishing]           = useState(false);
+  const [uploadError, setUploadError]       = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -245,18 +250,31 @@ export default function TryPage() {
   }, [showUpload, showPanel]);
 
   // ── Helpers ──
-  const toBase64 = (file: File): Promise<string> =>
-    new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.readAsDataURL(file);
-    });
+  const uploadFile = async (file: File, slug: string): Promise<string> => {
+    const ext = file.name.split('.').pop() ?? 'jpg';
+    const path = `${atlasId}/${slug}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+    const { error } = await supabase.storage
+      .from('user-photos')
+      .upload(path, file, { contentType: file.type });
+    if (error) throw error;
+    const { data } = supabase.storage.from('user-photos').getPublicUrl(path);
+    return data.publicUrl;
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const base64s = await Promise.all(files.map(toBase64));
-    setCurrentPhotos(prev => [...prev, ...base64s]);
-    setCurrentNotes(prev => [...prev, ...files.map(() => "")]);
+    if (!files.length || !selectedSlug) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const urls = await Promise.all(files.map(f => uploadFile(f, selectedSlug)));
+      setCurrentPhotos(prev => [...prev, ...urls]);
+      setCurrentNotes(prev => [...prev, ...files.map(() => "")]);
+    } catch {
+      setUploadError("Upload failed — check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
     e.target.value = "";
   };
 
@@ -264,9 +282,18 @@ export default function TryPage() {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/"));
-    const base64s = await Promise.all(files.map(toBase64));
-    setCurrentPhotos(prev => [...prev, ...base64s]);
-    setCurrentNotes(prev => [...prev, ...files.map(() => "")]);
+    if (!files.length || !selectedSlug) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const urls = await Promise.all(files.map(f => uploadFile(f, selectedSlug)));
+      setCurrentPhotos(prev => [...prev, ...urls]);
+      setCurrentNotes(prev => [...prev, ...files.map(() => "")]);
+    } catch {
+      setUploadError("Upload failed — check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const removePhoto = (i: number) => {
@@ -295,29 +322,44 @@ export default function TryPage() {
     setSelectedSlug(null);
   };
 
-  const handleFinish = () => {
-    const id = crypto.randomUUID();
-    // Store in format AtlasPage expects
-    const neighborhoods = Object.fromEntries(
-      Object.entries(memories).map(([slug, data]) => [slug, {
-        notes: data.notes,
-        photoBase64s: data.photoUrls,
-      }])
-    );
-    const payload = { id, createdAt: Date.now(), neighborhoods };
+  const handleFinish = async () => {
+    if (finishing) return;
+    setFinishing(true);
+    setUploadError(null);
     try {
-      localStorage.setItem(`citymood-map-${id}`, JSON.stringify(payload));
+      // Build neighborhood_data: { [slug]: { notes, photoUrls } }
+      const neighborhoodData = Object.fromEntries(
+        Object.entries(memories).map(([slug, data]) => [slug, {
+          notes: data.notes,
+          photoUrls: data.photoUrls,
+        }])
+      );
+
+      // Insert the atlas row
+      const { error: atlasError } = await supabase
+        .from('atlases')
+        .insert({ id: atlasId, neighborhood_data: neighborhoodData });
+      if (atlasError) throw atlasError;
+
+      // Insert one row per photo into the photos table
+      const photoRows = Object.entries(memories).flatMap(([slug, data]) =>
+        data.photoUrls.map(url => ({
+          atlas_id: atlasId,
+          neighborhood_slug: slug,
+          storage_url: url,
+        }))
+      );
+      if (photoRows.length > 0) {
+        const { error: photosError } = await supabase.from('photos').insert(photoRows);
+        if (photosError) throw photosError;
+      }
+
+      sessionStorage.removeItem(DRAFT_KEY);
+      navigate(`/atlas/${atlasId}`);
     } catch {
-      const slim = {
-        ...payload,
-        neighborhoods: Object.fromEntries(
-          Object.entries(neighborhoods).map(([k, v]) => [k, { ...v, photoBase64s: [] }])
-        ),
-      };
-      localStorage.setItem(`citymood-map-${id}`, JSON.stringify(slim));
+      setUploadError("Failed to save your atlas. Please try again.");
+      setFinishing(false);
     }
-    sessionStorage.removeItem(DRAFT_KEY);
-    navigate(`/atlas/${id}`);
   };
 
   // Open upload overlay for a neighborhood (new or existing)
@@ -408,16 +450,18 @@ export default function TryPage() {
               </span>
               <button
                 onClick={handleFinish}
+                disabled={finishing}
                 style={{
-                  fontSize: "0.65rem", color: "rgba(107,64,64,0.6)",
+                  fontSize: "0.65rem", color: finishing ? "rgba(107,64,64,0.35)" : "rgba(107,64,64,0.6)",
                   border: "0.5px solid rgba(107,64,64,0.2)", borderRadius: 100,
-                  padding: "5px 14px", background: "transparent", cursor: "pointer",
+                  padding: "5px 14px", background: "transparent",
+                  cursor: finishing ? "default" : "pointer",
                   letterSpacing: "0.08em", textTransform: "uppercase",
                   fontFamily: "'DM Sans', sans-serif", transition: "color 0.2s",
                 }}
-                onMouseEnter={e => (e.currentTarget.style.color = "rgba(107,64,64,1)")}
-                onMouseLeave={e => (e.currentTarget.style.color = "rgba(107,64,64,0.6)")}
-              >View my atlas →</button>
+                onMouseEnter={e => { if (!finishing) e.currentTarget.style.color = "rgba(107,64,64,1)"; }}
+                onMouseLeave={e => { if (!finishing) e.currentTarget.style.color = "rgba(107,64,64,0.6)"; }}
+              >{finishing ? "Saving…" : "View my atlas →"}</button>
             </>
           )}
         </div>
@@ -471,18 +515,24 @@ export default function TryPage() {
               </div>
             ))}
           </div>
+          {uploadError && (
+            <p style={{
+              fontSize: "0.6rem", color: "#c0392b", fontFamily: "'DM Sans', sans-serif",
+              marginTop: 8, letterSpacing: "0.04em",
+            }}>{uploadError}</p>
+          )}
           <div
-            onClick={handleFinish}
+            onClick={finishing ? undefined : handleFinish}
             style={{
-              fontSize: "0.72rem", color: "#DD9389",
-              cursor: "pointer", marginTop: 12,
+              fontSize: "0.72rem", color: finishing ? "rgba(221,147,137,0.4)" : "#DD9389",
+              cursor: finishing ? "default" : "pointer", marginTop: 12,
               fontFamily: "'DM Sans', sans-serif",
               transition: "opacity 0.18s",
             }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = "0.65")}
-            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+            onMouseEnter={e => { if (!finishing) e.currentTarget.style.opacity = "0.65"; }}
+            onMouseLeave={e => { if (!finishing) e.currentTarget.style.opacity = "1"; }}
           >
-            Finish &amp; generate your map →
+            {finishing ? "Saving your atlas…" : "Finish & generate your map →"}
           </div>
         </div>
       )}
@@ -611,10 +661,18 @@ export default function TryPage() {
               transition: "border-color 0.2s ease, background 0.2s ease",
             }}
           >
-            <div style={{ fontSize: "1.8rem", color: "rgba(107,64,64,0.25)", lineHeight: 1 }}>+</div>
-            <div style={{ fontSize: "0.78rem", color: "rgba(107,64,64,0.35)", fontFamily: "'DM Sans', sans-serif" }}>
-              Drop photos here, or click to choose
-            </div>
+            {uploading ? (
+              <div style={{ fontSize: "0.72rem", color: "rgba(107,64,64,0.5)", fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.06em" }}>
+                Uploading…
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: "1.8rem", color: "rgba(107,64,64,0.25)", lineHeight: 1 }}>+</div>
+                <div style={{ fontSize: "0.78rem", color: "rgba(107,64,64,0.35)", fontFamily: "'DM Sans', sans-serif" }}>
+                  Drop photos here, or click to choose
+                </div>
+              </>
+            )}
           </div>
 
           <input
