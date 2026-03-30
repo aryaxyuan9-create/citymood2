@@ -20,6 +20,10 @@ const HOOD_MAP = [
   { slug: 'gramercy',          name: 'Gramercy / Murray Hill', borough: 'Manhattan', mood: 'Quiet & composed',      accent: '#c8b890', ntaNames: ['Gramercy'] },
   { slug: 'dumbo',             name: 'DUMBO',                  borough: 'Brooklyn',  mood: 'Moody & vast',          accent: '#a8c0d8', ntaNames: ['Downtown Brooklyn-DUMBO-Boerum Hill'] },
   { slug: 'williamsburg',      name: 'Williamsburg',           borough: 'Brooklyn',  mood: 'Loud & searching',      accent: '#d8b8a0', ntaNames: ['Williamsburg', 'South Williamsburg'] },
+  { slug: 'washington-heights',name: 'Washington Heights',     borough: 'Manhattan', mood: 'Vibrant & uptown',      accent: '#c8a090', ntaNames: ['Washington Heights (North)', 'Washington Heights (South)'] },
+  { slug: 'upper-east-side',   name: 'Upper East Side',        borough: 'Manhattan', mood: 'Refined & composed',    accent: '#b8c8a8', ntaNames: ['Upper East Side-Carnegie Hill', 'Upper East Side-Lenox Hill-Roosevelt Island', 'Upper East Side-Yorkville'] },
+  { slug: 'central-park',      name: 'Central Park',           borough: 'Manhattan', mood: 'Open & breathing',      accent: '#90c0a0', ntaNames: ['Central Park'] },
+  { slug: 'lower-east-side',   name: 'Lower East Side',        borough: 'Manhattan', mood: 'Gritty & alive',        accent: '#d4a8b0', ntaNames: ['Lower East Side'] },
 ]
 
 const featuresByNta = {}

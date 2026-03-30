@@ -3,6 +3,22 @@
 @import 'tw-animate-css';
 @import './styles/globals.css';
 
+:root {
+  --color-bg: #0A0814;
+  --color-purple: #9B30FF;
+  --color-purple-light: #C4AEF4;
+  --color-gold: #FFD700;
+  --color-gold-dark: #B8860B;
+  --color-blue: #4169E1;
+  --color-blue-deep: #1E2F6E;
+  --color-green-dark: #2F4F4F;
+  --color-pink: #FF69B4;
+  --color-text-primary: #EDE8F8;
+  --color-text-muted: rgba(196,174,244,0.45);
+  --color-text-dim: rgba(196,174,244,0.25);
+  --color-border: rgba(155,48,255,0.15);
+}
+
 @layer base {
   html, body, #root { min-height: 100vh; height: 100%; margin: 0; }
 }

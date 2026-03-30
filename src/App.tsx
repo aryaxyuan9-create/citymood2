@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { ImageWithFallback } from "./components/figma/ImageWithFallback";
 import ShaderBackground from "./components/home/ShaderBackground";
 import { getNeighborhoodPhotos } from "./lib/photos";
+import { NEIGHBORHOOD_DATA } from "./lib/neighborhoods";
+import NeighborhoodGallery from "./components/NeighborhoodGallery";
+import AtlasStyledMap from "./components/AtlasStyledMap";
 
 // ─────────────────────────────────────────────
 //  Types
@@ -157,6 +160,34 @@ const HOODS: Hood[] = [
     ],
     path:`M 281.2 407.9 L 294.0 413.3 L 305.9 410.4 L 309.7 415.4 L 315.7 413.1 L 318.2 424.4 L 322.8 424.1 L 298.9 436.5 L 314.6 436.5 L 317.3 448.5 L 308.9 449.1 L 311.3 460.2 L 282.1 452.1 L 280.0 455.3 L 261.6 454.0 L 242.2 456.5 L 238.8 455.8 L 236.6 453.2 L 236.3 449.7 L 237.6 447.0 L 235.8 446.5 L 238.4 444.9 L 236.4 444.2 L 239.0 444.3 L 240.4 440.6 L 242.0 439.6 L 240.4 438.8 L 246.5 428.4 L 254.6 422.2 L 254.1 419.7 L 257.1 420.0 L 263.6 413.5 L 267.8 406.6 L 266.1 405.9 L 269.7 405.5 L 281.2 407.9 Z M 311.3 460.2 L 342.9 473.4 L 263.3 480.8 L 265.8 474.8 L 246.7 463.6 L 242.2 456.5 L 261.6 454.0 L 280.0 455.3 L 282.1 452.1 L 311.3 460.2 Z`,
     labelX:263.2, labelY:433.7,
+  },
+  {
+    id:"washington-heights", name:"Washington Heights", borough:"Manhattan", mood:"Vibrant & uptown", energy:7,
+    accent:"#c8a090", glow:"rgba(200,160,144,0.5)",
+    photos:[],
+    path:`M 311.4 104.1 L 326.9 77.6 L 323.7 59.4 L 379.3 6.1 L 393.2 14.4 L 415.4 36.2 L 383.0 67.8 L 348.9 114.7 L 311.4 104.1 Z`,
+    labelX:355, labelY:82,
+  },
+  {
+    id:"upper-east-side", name:"Upper East Side", borough:"Manhattan", mood:"Refined & composed", energy:6,
+    accent:"#b8c8a8", glow:"rgba(184,200,168,0.5)",
+    photos:[],
+    path:`M 373.7 145.4 L 392.0 195.9 L 388.9 212.9 L 355.4 222.3 L 318.6 204.1 L 373.7 145.4 Z M 318.6 204.1 L 346.3 219.5 L 369.1 221.9 L 365.5 243.3 L 336.4 246.9 L 336.5 253.8 L 342.3 265.4 L 321.7 281.5 L 290.2 232.3 L 318.6 204.1 Z`,
+    labelX:335, labelY:235,
+  },
+  {
+    id:"central-park", name:"Central Park", borough:"Manhattan", mood:"Open & breathing", energy:4,
+    accent:"#7aab7a", glow:"rgba(122,171,122,0.5)",
+    photos:[],
+    path:`M 315.1 207.6 L 224.6 297.7 L 192.3 287.7 L 281.1 197.3 L 315.1 207.6 Z`,
+    labelX:253, labelY:248,
+  },
+  {
+    id:"lower-east-side", name:"Lower East Side", borough:"Manhattan", mood:"Gritty & alive", energy:9,
+    accent:"#e8a055", glow:"rgba(232,160,85,0.5)",
+    photos:[],
+    path:`M 229.3 404.0 L 265.3 382.1 L 268.0 403.9 L 266.1 405.9 L 242.2 456.5 L 222.5 424.0 L 229.3 404.0 Z`,
+    labelX:248, labelY:420,
   },
 ];
 
@@ -314,16 +345,34 @@ function RippleCanvas() {
 }
 
 // ─────────────────────────────────────────────
+//  Photo density → glow intensity tiers
+// ─────────────────────────────────────────────
+function getHoodGlow(count: number): { stroke: string; sw: number; filter: string | undefined } {
+  if (count <= 2) return { stroke: "#946C18", sw: 0.7, filter: undefined       };
+  if (count <= 5) return { stroke: "#D2A941", sw: 1.2, filter: undefined       };
+  return          { stroke: "#F0DC92",        sw: 1.8, filter: "url(#glow-md)" };
+}
+
+// ─────────────────────────────────────────────
 //  Abstract NYC Map — line art style
 // ─────────────────────────────────────────────
-function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
+function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef, zoomLevel }: {
   activeId: string | null;
   onSelect: (id: string, x: number, y: number) => void;
   onDeselect: () => void;
   onExplore: (id: string) => void;
   svgRef: React.RefObject<SVGSVGElement>;
+  zoomLevel: number;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const mapScale = zoomLevel;
+  const mapTranslateX = 210 * (1 - mapScale);
+  const mapTranslateY = 310 * (1 - mapScale);
+  const showCoverPhotos = zoomLevel >= 1.08 && zoomLevel < 1.36;
+  const showDetailedPins = zoomLevel >= 1.36;
+  const atlasLine = "rgba(244,194,109,0.58)";
+  const atlasHover = "rgba(254,222,139,0.95)";
+  const atlasActive = "rgba(255,242,184,0.98)";
 
   const manhattanOutline = `M 118.9 491.2 L 110.4 489.8 L 118.9 491.2 Z M 128.1 480.7 L 117.9 481.2 L 128.1 480.7 Z M 129.5 478.7 L 121.8 476.8 L 129.5 478.7 Z M 136.0 471.4 L 129.0 471.2 L 140.4 467.1 L 136.0 471.4 Z M 75.0 423.2 L 69.7 437.6 L 105.6 439.7 L 125.2 453.3 L 90.1 473.5 L 69.8 475.0 L 67.5 462.8 L 48.3 458.5 L 58.3 423.9 L 75.0 423.2 Z M 124.5 426.9 L 116.5 448.2 L 69.7 437.6 L 75.1 422.7 L 59.6 419.0 L 72.4 419.2 L 62.2 416.7 L 74.2 415.9 L 80.7 404.1 L 124.5 426.9 Z M 80.3 518.2 L 90.8 513.6 L 80.3 518.2 Z M 102.8 509.6 L 92.1 510.2 L 102.8 509.6 Z M 107.3 506.0 L 96.1 506.3 L 107.3 506.0 Z M 101.6 500.0 L 110.6 501.8 L 101.6 500.0 Z M -45.1 502.5 L -59.8 503.2 L -45.1 502.5 Z M 114.4 497.9 L 103.6 498.1 L 114.4 497.9 Z M 58.1 493.8 L 76.8 496.1 L 75.0 505.0 L 34.1 522.6 L 21.0 516.5 L 58.1 493.8 Z M 116.0 495.3 L 106.6 494.1 L 116.0 495.3 Z M -30.2 472.9 L -23.6 479.9 L -44.3 480.8 L -30.2 472.9 Z M 59.6 462.0 L 67.6 462.9 L 67.8 475.1 L 53.8 465.6 L 59.6 462.0 Z M 111.2 397.0 L 150.0 408.6 L 136.9 430.5 L 64.0 402.5 L 111.2 397.0 Z M 160.3 380.2 L 150.0 408.6 L 111.2 397.0 L 133.9 372.1 L 160.3 380.2 Z M 87.1 357.9 L 133.9 372.1 L 111.2 397.0 L 67.1 396.7 L 80.0 386.0 L 68.6 383.2 L 81.1 382.9 L 82.3 367.1 L 73.7 362.7 L 87.1 357.9 Z M 180.9 449.1 L 125.2 453.3 L 115.9 437.5 L 141.7 424.3 L 177.7 435.4 L 180.9 449.1 Z M 216.8 423.5 L 210.1 443.8 L 180.9 449.1 L 177.7 435.4 L 141.7 424.3 L 150.0 408.6 L 216.8 423.5 Z M 229.3 404.0 L 222.5 424.0 L 150.0 408.6 L 160.3 380.2 L 229.3 404.0 Z M 115.1 303.2 L 153.7 324.1 L 132.9 344.9 L 154.5 351.5 L 133.9 372.1 L 75.7 355.0 L 88.0 354.0 L 77.0 349.3 L 85.9 348.9 L 77.8 346.5 L 86.7 346.1 L 78.5 343.7 L 87.4 343.3 L 79.2 340.8 L 89.8 331.2 L 83.9 329.0 L 103.6 315.6 L 95.2 311.6 L 115.1 303.2 Z M 136.7 272.8 L 189.0 289.1 L 153.7 324.1 L 138.0 319.3 L 139.1 310.5 L 107.6 299.6 L 123.3 299.7 L 113.2 294.1 L 126.1 296.9 L 115.9 290.2 L 129.2 293.3 L 119.4 286.7 L 132.7 289.8 L 122.9 283.2 L 133.0 285.4 L 125.6 280.6 L 135.9 282.4 L 141.2 277.7 L 133.0 274.8 L 143.0 275.3 L 136.7 272.8 Z M 194.8 343.4 L 160.3 380.2 L 133.9 372.1 L 154.5 351.5 L 132.9 344.9 L 146.8 331.1 L 194.8 343.4 Z M 224.6 297.7 L 236.8 301.5 L 194.8 343.4 L 146.8 331.1 L 190.0 288.1 L 224.6 297.7 Z M 216.8 377.6 L 229.9 401.8 L 188.3 388.7 L 203.6 373.4 L 216.8 377.6 Z M 203.6 373.4 L 188.3 388.7 L 160.3 380.2 L 182.5 355.6 L 203.6 373.4 Z M 266.6 388.1 L 260.0 388.5 L 266.6 388.1 Z M 213.0 333.2 L 244.0 342.8 L 228.9 357.3 L 226.6 376.4 L 219.3 374.7 L 224.9 378.4 L 187.9 366.2 L 194.7 359.3 L 182.5 355.6 L 213.0 333.2 Z M 249.1 305.2 L 279.9 313.5 L 240.2 336.8 L 204.3 330.5 L 236.8 301.5 L 249.1 305.2 Z M 253.9 331.8 L 236.1 340.3 L 253.9 331.8 Z M 217.0 261.0 L 189.0 289.1 L 136.2 271.4 L 145.0 273.1 L 167.1 250.3 L 217.0 261.0 Z M 258.2 220.0 L 217.0 261.0 L 167.1 250.3 L 211.7 203.7 L 258.2 220.0 Z M 275.5 195.7 L 258.2 220.0 L 211.7 203.7 L 231.9 182.9 L 275.5 195.7 Z M 343.4 284.5 L 268.3 337.9 L 350.0 273.8 L 343.4 284.5 Z M 280.4 313.2 L 249.1 305.2 L 284.4 270.0 L 321.7 281.5 L 280.4 313.2 Z M 314.7 239.9 L 249.1 305.2 L 224.6 297.7 L 290.2 232.3 L 314.7 239.9 Z M 357.7 251.9 L 351.8 255.4 L 357.7 251.9 Z M 336.5 253.8 L 342.3 265.4 L 321.7 281.5 L 284.4 270.0 L 314.7 239.9 L 336.5 253.8 Z M 304.2 167.3 L 275.5 195.7 L 231.9 182.9 L 266.4 148.9 L 304.2 167.3 Z M 327.1 140.1 L 304.2 167.3 L 266.4 148.9 L 282.0 136.0 L 277.4 131.7 L 327.1 140.1 Z M 348.9 114.7 L 353.1 120.7 L 330.6 141.2 L 277.4 131.7 L 311.4 104.1 L 348.9 114.7 Z M 343.5 179.3 L 315.1 207.6 L 275.5 195.7 L 304.2 167.3 L 343.5 179.3 Z M 368.7 108.6 L 372.8 149.6 L 343.5 179.3 L 304.2 167.3 L 370.5 99.2 L 368.7 108.6 Z M 346.3 219.5 L 369.1 221.9 L 336.4 246.9 L 290.2 232.3 L 318.6 204.1 L 346.3 219.5 Z M 373.7 145.4 L 371.8 172.5 L 392.0 195.9 L 388.9 212.9 L 355.4 222.3 L 318.6 204.1 L 373.7 145.4 Z M 440.1 205.3 L 450.0 216.0 L 410.7 247.2 L 365.5 243.3 L 385.1 223.8 L 403.1 224.5 L 394.6 218.3 L 405.5 193.5 L 440.1 205.3 Z M 383.0 67.8 L 348.9 114.7 L 311.4 104.1 L 326.9 77.6 L 323.7 59.4 L 383.0 67.8 Z M 393.2 14.4 L 408.3 28.7 L 400.1 39.9 L 408.7 41.7 L 389.2 65.9 L 323.7 59.4 L 343.1 50.0 L 379.3 6.1 L 393.2 14.4 Z M 415.4 36.2 L 417.7 45.1 L 348.9 114.7 L 367.1 83.6 L 399.4 56.7 L 408.7 41.4 L 400.2 36.5 L 408.3 28.7 L 415.4 36.2 Z M 315.1 207.6 L 224.6 297.7 L 192.3 287.7 L 281.1 197.3 L 315.1 207.6 Z`;
 
@@ -333,7 +382,7 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
 
   return (
     <>
-    <svg ref={svgRef} viewBox="18 70 384 480" style={{ width: "100%", height: "100%", display: "block" }} onClick={onDeselect}>
+    <svg ref={svgRef} viewBox="18 70 384 480" preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: "100%", display: "block" }} onClick={onDeselect}>
       <defs>
         {/* Hatching patterns per neighborhood */}
         {HOODS.map(hood => (
@@ -358,6 +407,61 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
           <feGaussianBlur stdDeviation="2.5" result="b" />
           <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
         </filter>
+        <filter id="mapElevation" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="4" stdDeviation="12"
+            floodColor="rgba(143, 31, 23, 0.2)" floodOpacity="1" result="shadow"/>
+          <feDropShadow dx="0" dy="2" stdDeviation="4"
+            floodColor="rgba(217, 160, 144, 0.3)" floodOpacity="1"/>
+        </filter>
+        <filter id="outerGlow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="8" result="blur"/>
+          <feColorMatrix type="matrix"
+            values="1 0 0 0 0.56  0 0 0 0 0.12  0 0 0 0 0.09  0 0 0 0 0.6" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <filter id="glow1" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow2" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="10" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow3" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="20"/>
+        </filter>
+        <filter id="fPhotoGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+
+        {/* Neighborhood glow tiers */}
+        <filter id="glow-sm" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="1.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-md" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-lg" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-xl" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="10"/>
+        </filter>
+        <filter id="glow-hover" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-active" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="6" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
 
         {/* Water gradient */}
         <linearGradient id="waterGrad" x1="0" y1="0" x2="0.5" y2="1">
@@ -370,8 +474,63 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
         </linearGradient>
       </defs>
 
+      <style>{`
+        @keyframes shimmer {
+          0%, 100% { opacity: 0.15; }
+          50% { opacity: 0.7; }
+        }
+        @keyframes shimmerSlow {
+          0%, 100% { opacity: 0.08; }
+          50% { opacity: 0.4; }
+        }
+        @keyframes shimmerFast {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 0.9; }
+        }
+        .glow-inner {
+          animation: shimmerFast 2.5s ease-in-out infinite;
+          fill: none;
+          stroke: rgba(155,48,255,0.9);
+          stroke-width: 1.5;
+          pointer-events: none;
+          filter: url(#glow1);
+        }
+        .glow-mid {
+          animation: shimmer 3.5s ease-in-out infinite;
+          fill: none;
+          stroke: rgba(155,48,255,0.55);
+          stroke-width: 3;
+          pointer-events: none;
+          filter: url(#glow2);
+        }
+        .glow-outer {
+          animation: shimmerSlow 5s ease-in-out infinite reverse;
+          fill: none;
+          stroke: rgba(155,48,255,0.35);
+          stroke-width: 8;
+          pointer-events: none;
+          filter: url(#glow3);
+        }
+        @keyframes hoodPulse {
+          0%, 100% { stroke-opacity: 0.6; }
+          50%      { stroke-opacity: 1; }
+        }
+        .hood-selected { animation: hoodPulse 1.5s ease-in-out infinite; }
+
+        .city-block { animation: none; }
+      `}</style>
+
+      <g transform={`translate(${mapTranslateX} ${mapTranslateY}) scale(${mapScale})`}>
       {/* ── Water background ── */}
-      <rect width="402" height="550" fill="url(#waterGrad)" />
+      <rect width="402" height="550" fill="none" />
+
+      {/* ── NYC outer boundary glow (behind all elements) ── */}
+      <path d={manhattanOutline} className="glow-outer" />
+      <path d={brooklynOutline} className="glow-outer" />
+      <path d={manhattanOutline} className="glow-mid" style={{ animationDelay: "0.8s" }} />
+      <path d={brooklynOutline} className="glow-mid" style={{ animationDelay: "0.8s" }} />
+      <path d={manhattanOutline} className="glow-inner" style={{ animationDelay: "1.6s" }} />
+      <path d={brooklynOutline} className="glow-inner" style={{ animationDelay: "1.6s" }} />
 
       {/* Water scan lines — hidden */}
       {[...Array(20)].map((_, i) => (
@@ -380,54 +539,119 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
       ))}
 
       {/* ── Queens (bg land) ── */}
-      <path d={queensOutline} fill="rgba(210,160,80,0.28)"
-        stroke="rgba(180,130,60,0.18)" strokeWidth={0.35} />
+      <path d={queensOutline} fill="none"
+        stroke="rgba(244,194,109,0.28)" strokeWidth={0.45} />
 
       {/* ── Brooklyn land ── */}
-      <path d={brooklynOutline} fill="url(#landGrad)"
-        stroke="rgba(180,130,60,0.22)" strokeWidth={0.4} />
+      <path d={brooklynOutline} fill="none"
+        stroke="rgba(244,194,109,0.34)" strokeWidth={0.55} />
       {/* Brooklyn shoreline glow */}
       <path d={brooklynOutline} fill="none"
-        stroke="rgba(200,150,70,0.22)" strokeWidth={3}
+        stroke="rgba(240,183,93,0.32)" strokeWidth={3}
         filter="url(#fShoreGlow)" />
 
       {/* ── Manhattan land ── */}
-      <path d={manhattanOutline} fill="url(#landGrad)" />
-
+      <path d={manhattanOutline} fill="none" />
 
       {/* ── Manhattan shoreline — double stroke ── */}
       {/* Outer glow */}
       <path d={manhattanOutline} fill="none"
-        stroke="rgba(200,150,70,0.18)" strokeWidth={5}
+        stroke="rgba(240,183,93,0.3)" strokeWidth={5}
         filter="url(#fShoreGlow)" />
       {/* Precise inner line */}
       <path d={manhattanOutline} fill="none"
-        stroke="rgba(180,130,60,0.45)" strokeWidth={0.6} />
+        stroke="rgba(244,194,109,0.52)" strokeWidth={0.75} />
 
-      {/* ── Neighborhood zones — line art ── */}
+      {/* ── Neighborhood zones — city glow ── */}
       {HOODS.map((hood) => {
-        const isActive = activeId === hood.id;
-        const isHovered = hovered === hood.id;
+        const isActive  = activeId  === hood.id;
+        const isHovered = hovered   === hood.id;
 
-        const fill   = isActive ? "rgba(13,35,124,0.14)" : isHovered ? "rgba(217,160,144,0.18)" : "rgba(217,160,144,0.07)";
-        const stroke = isActive ? "rgba(13,35,124,0.48)" : isHovered ? "rgba(143,31,23,0.38)" : "rgba(143,31,23,0.17)";
-        const sw     = isActive ? 1.1 : isHovered ? 0.7 : 0.42;
+        // Central Park: non-clickable dashed outline, no label
+        if (hood.id === 'central-park') {
+          return (
+            <path key={hood.id}
+              d={hood.path} fill="none"
+              stroke="rgba(155,48,255,0.4)" strokeWidth={0.6}
+              strokeDasharray="4,3" pointerEvents="none" />
+          );
+        }
+
         return (
           <g key={hood.id}>
-            <path d={hood.path} fill={fill} style={{ transition: "fill 0.25s", pointerEvents: "none" }} />
-            {isActive && (
-              <path d={hood.path} fill={`url(#hatch-${hood.id})`} style={{ pointerEvents: "none" }} />
-            )}
-            <path d={hood.path} fill="none" stroke={stroke} strokeWidth={sw}
-              style={{ cursor: "pointer", transition: "stroke 0.25s, stroke-width 0.25s" }}
+            {/* Primary stroke — cityGlow pulse when default, static pale cream when hover/active */}
+            <path d={hood.path} fill="none"
+              className={(!isActive && !isHovered) ? "city-block" : undefined}
+              filter={isActive ? "url(#glow-lg)" : isHovered ? "url(#glow-md)" : undefined}
+              style={{
+                stroke: isActive ? atlasActive : isHovered ? atlasHover : atlasLine,
+                strokeWidth: isActive ? 2.2 : isHovered ? 1.8 : 1.2,
+                animation: (isActive || isHovered) ? "none" : undefined,
+                cursor: "pointer",
+                transition: "stroke 0.25s, stroke-width 0.25s",
+              }}
               onMouseEnter={() => setHovered(hood.id)}
               onMouseLeave={() => setHovered(null)}
               onClick={e => { e.stopPropagation(); onSelect(hood.id, e.clientX, e.clientY); }} />
+            {/* Fat invisible hit target */}
             <path d={hood.path} fill="transparent" stroke="transparent" strokeWidth={10}
               style={{ cursor: "pointer" }}
               onMouseEnter={() => setHovered(hood.id)}
               onMouseLeave={() => setHovered(null)}
               onClick={e => { e.stopPropagation(); onSelect(hood.id, e.clientX, e.clientY); }} />
+            {/* Labels hidden to match atlas visual language */}
+          </g>
+        );
+      })}
+
+      {showCoverPhotos && HOODS.map((hood) => {
+        const photos = getNeighborhoodPhotos(hood.id);
+        if (!photos.length || hood.id === "central-park") return null;
+        const url = photos[0];
+        return (
+          <g key={`cover-${hood.id}`} pointerEvents="none">
+            <rect
+              x={hood.labelX - 6.5}
+              y={hood.labelY - 6.5}
+              width={13}
+              height={13}
+              rx={3}
+              fill="rgba(10,8,20,0.85)"
+              stroke="rgba(255,230,180,0.85)"
+              strokeWidth={0.9}
+            />
+            <image
+              href={url}
+              x={hood.labelX - 5.8}
+              y={hood.labelY - 5.8}
+              width={11.6}
+              height={11.6}
+              preserveAspectRatio="xMidYMid slice"
+              style={{ filter: "url(#fPhotoGlow)" }}
+            />
+          </g>
+        );
+      })}
+
+      {showDetailedPins && HOODS.map((hood) => {
+        const photos = getNeighborhoodPhotos(hood.id);
+        if (!photos.length || hood.id === "central-park") return null;
+        const pinCount = Math.min(photos.length, 6);
+        return (
+          <g key={`pins-${hood.id}`} pointerEvents="none">
+            {Array.from({ length: pinCount }).map((_, idx) => {
+              const angle = (idx / Math.max(pinCount, 1)) * Math.PI * 2;
+              const radius = 6 + (idx % 2) * 4;
+              const px = hood.labelX + Math.cos(angle) * radius;
+              const py = hood.labelY + Math.sin(angle) * radius;
+              return (
+                <g key={`${hood.id}-pin-${idx}`}>
+                  <circle cx={px} cy={py} r={3.8} fill="rgba(12,8,24,0.82)" />
+                  <circle cx={px} cy={py} r={2.7} fill="rgba(255,215,120,0.9)" />
+                  <circle cx={px} cy={py} r={1.3} fill="#fff5da" />
+                </g>
+              );
+            })}
           </g>
         );
       })}
@@ -443,24 +667,9 @@ function NYCMap({ activeId, onSelect, onDeselect, onExplore, svgRef }: {
         fontFamily="'DM Sans', sans-serif" letterSpacing="0.2" textAnchor="middle">
         UPPER NEW YORK BAY
       </text>
-
-      {/* ── Compass ── */}
-      <g transform="translate(450,108)">
-        <line x1={0} y1={-11} x2={0} y2={11} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <line x1={-11} y1={0} x2={11} y2={0} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <circle cx={0} cy={0} r={2} fill="none" stroke="rgba(140,90,40,0.35)" strokeWidth={0.5} />
-        <text x={0} y={-14} textAnchor="middle" fill="rgba(140,90,40,0.4)"
-          fontSize={5} fontFamily="'DM Sans', sans-serif" letterSpacing="0.1">N</text>
       </g>
 
-      {/* ── Scale bar ── */}
-      <g transform="translate(376,574)">
-        <line x1={0} y1={0} x2={48} y2={0} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <line x1={0} y1={-3} x2={0} y2={3} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <line x1={48} y1={-3} x2={48} y2={3} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <text x={24} y={9} textAnchor="middle" fill="rgba(140,90,40,0.4)"
-          fontSize={5} fontFamily="'DM Sans', sans-serif" letterSpacing="0.12">1 MI</text>
-      </g>
+      {/* Compass + scale hidden to match atlas visual language */}
     </svg>
     </>
   );
@@ -567,184 +776,6 @@ function LightTracker({ phase, prog, hour, minute }: { phase: Phase; prog: numbe
   );
 }
 
-// ─────────────────────────────────────────────
-//  Gallery Modal
-// ─────────────────────────────────────────────
-function GalleryModal({ hood, onClose }: { hood: Hood; onClose: () => void }) {
-  const allPaths = getNeighborhoodPhotos(hood.id);
-  const [hiddenSet, setHiddenSet] = useState<Set<number>>(new Set());
-  const [selected, setSelected] = useState<number>(0);
-  const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  const hideSlot = (i: number) =>
-    setHiddenSet(prev => new Set([...prev, i]));
-
-  const visiblePhotos = allPaths
-    .map((src, i) => ({ src, i }))
-    .filter(({ i }) => !hiddenSet.has(i));
-
-  const total = visiblePhotos.length;
-
-  useEffect(() => {
-    if (selected >= total && total > 0) setSelected(total - 1);
-  }, [total, selected]);
-
-  // Scroll right panel to photo when thumbnail is clicked
-  const scrollToPhoto = (gridPos: number) => {
-    setSelected(gridPos);
-    photoRefs.current[gridPos]?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  // Keep thumbnail highlight in sync as user scrolls
-  useEffect(() => {
-    const root = scrollRef.current;
-    if (!root) return;
-    const observers: IntersectionObserver[] = [];
-    visiblePhotos.forEach(({ }, gridPos) => {
-      const el = photoRefs.current[gridPos];
-      if (!el) return;
-      const obs = new IntersectionObserver(
-        ([entry]) => { if (entry.isIntersecting) setSelected(gridPos); },
-        { root, threshold: 0.35 }
-      );
-      obs.observe(el);
-      observers.push(obs);
-    });
-    return () => observers.forEach(o => o.disconnect());
-  }, [total, hiddenSet]);
-
-  useEffect(() => {
-    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", fn);
-    return () => window.removeEventListener("keydown", fn);
-  }, [onClose]);
-
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 300,
-      display: "flex", animation: "fadeIn 0.26s ease both",
-    }}>
-      {/* Reuse site background */}
-      <ShaderBackground />
-
-      {/* ── Back button ── */}
-      <button
-        onClick={onClose}
-        style={{
-          position: "fixed", top: "20px", left: "20px", zIndex: 400,
-          background: "rgba(235,211,208,0.7)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
-          borderRadius: "100px", padding: "8px 16px",
-          fontSize: "0.75rem", color: "#5a3535",
-          border: "0.5px solid rgba(107,64,64,0.2)",
-          cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-          transition: "background 0.2s",
-        }}
-        onMouseEnter={e => (e.currentTarget.style.background = "rgba(235,211,208,0.9)")}
-        onMouseLeave={e => (e.currentTarget.style.background = "rgba(235,211,208,0.7)")}>
-        ← Back
-      </button>
-
-      {/* ── Left panel — thumbnail grid ── */}
-      <div style={{
-        width: "30%", flexShrink: 0,
-        background: "rgba(235,211,208,0.6)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-        padding: "24px 16px",
-        overflowY: "auto", height: "100vh",
-        display: "flex", flexDirection: "column",
-        position: "relative", zIndex: 1,
-      }}>
-        <div style={{ paddingTop: "52px", marginBottom: "0" }}>
-          <h2 style={{
-            fontFamily: "'Cormorant Garamond', serif", fontSize: "1.8rem", fontWeight: 300,
-            color: "#471F1F", marginBottom: "4px", lineHeight: 1.1,
-          }}>{hood.name}</h2>
-          <p style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: "0.6rem", letterSpacing: "0.12em",
-            textTransform: "uppercase", color: "rgba(107,64,64,0.5)",
-          }}>
-            {hood.borough} · {total} PHOTOGRAPHS · {hood.mood}
-          </p>
-          <div style={{ height: "0.5px", background: "rgba(107,64,64,0.15)", margin: "16px 0" }} />
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
-          {visiblePhotos.map(({ src, i }, gridPos) => (
-            <img
-              key={i}
-              src={src}
-              alt=""
-              onError={() => hideSlot(i)}
-              onClick={() => scrollToPhoto(gridPos)}
-              style={{
-                aspectRatio: "1",
-                objectFit: "cover",
-                borderRadius: "6px",
-                cursor: "pointer",
-                width: "100%",
-                display: "block",
-                border: gridPos === selected ? "1.5px solid #8F1F17" : "1.5px solid transparent",
-                boxShadow: gridPos === selected ? "0 0 0 1px rgba(143,31,23,0.2)" : "none",
-                opacity: gridPos === selected ? 1 : 0.75,
-                transition: "all 0.2s ease",
-                animation: `fadeIn 0.3s ease ${gridPos * 0.05}s both`,
-              }}
-              onMouseEnter={e => {
-                if (gridPos !== selected) {
-                  e.currentTarget.style.opacity = "1";
-                  e.currentTarget.style.borderColor = "rgba(143,31,23,0.3)";
-                  e.currentTarget.style.transform = "scale(1.03)";
-                }
-              }}
-              onMouseLeave={e => {
-                if (gridPos !== selected) {
-                  e.currentTarget.style.opacity = "0.75";
-                  e.currentTarget.style.borderColor = "transparent";
-                  e.currentTarget.style.transform = "scale(1)";
-                }
-              }}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* ── Right panel — vertical scroll feed ── */}
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          background: "rgba(245,237,232,0.4)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
-          overflowY: "auto", height: "100vh",
-          position: "relative", zIndex: 1,
-        }}
-      >
-        <div style={{ padding: "48px 48px 80px" }}>
-          {visiblePhotos.map(({ src, i }, gridPos) => (
-            <div
-              key={i}
-              ref={el => { photoRefs.current[gridPos] = el; }}
-              style={{
-                marginBottom: "48px",
-                animation: `fadeIn 0.4s ease ${gridPos * 0.07}s both`,
-              }}
-            >
-              <img
-                src={src}
-                alt=""
-                onError={() => hideSlot(i)}
-                style={{
-                  width: "100%",
-                  display: "block",
-                  borderRadius: "4px",
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────
 //  App
@@ -754,8 +785,7 @@ export default function App() {
   const [now, setNow] = useState(new Date());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [galleryId, setGalleryId] = useState<string | null>(null);
-  const [floatingCard, setFloatingCard] = useState<{ id: string; x: number; y: number } | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
+  const [floatingCard, setFloatingCard] = useState<{ id: string } | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30000);
@@ -775,11 +805,14 @@ export default function App() {
   const prog = pct(h, m);
 
   const galleryHood = HOODS.find(n => n.id === galleryId) ?? null;
+  const photoCountByHood = Object.fromEntries(HOODS.map(h => [h.id, getNeighborhoodPhotos(h.id).length]));
+  const selectableIds = HOODS.map(h => h.id);
+  const maxPhotoCount = Math.max(1, ...Object.values(photoCountByHood));
 
-  const handleSelect = (id: string, x: number, y: number) => {
+  const handleSelect = (id: string) => {
     if (activeId === id) { setActiveId(null); setFloatingCard(null); return; }
     setActiveId(id);
-    setFloatingCard({ id, x, y });
+    setFloatingCard({ id });
   };
 
   const handleDeselect = () => { setActiveId(null); setFloatingCard(null); };
@@ -787,15 +820,7 @@ export default function App() {
   const handlePanelSelect = (id: string) => {
     if (activeId === id) { setActiveId(null); setFloatingCard(null); return; }
     setActiveId(id);
-    if (svgRef.current) {
-      const hood = HOODS.find(h => h.id === id);
-      if (hood) {
-        const rect = svgRef.current.getBoundingClientRect();
-        const screenX = ((hood.labelX - 18) / 384) * rect.width + rect.left;
-        const screenY = ((hood.labelY - 70) / 480) * rect.height + rect.top;
-        setFloatingCard({ id, x: screenX, y: screenY });
-      }
-    }
+    setFloatingCard({ id });
   };
 
   return (
@@ -836,12 +861,61 @@ export default function App() {
         .lt-text    { animation: floatText 7s ease-in-out infinite; }
         .lt-horizon { animation: horizonPulse 6s ease-in-out infinite; }
 
+        body, #root { background: transparent !important; }
+        svg { background: transparent !important; }
+        .mapboxgl-map, .mapboxgl-canvas, .mapboxgl-canvas-container { background: transparent !important; }
+        .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl { margin: 0 14px 14px 0; }
+        .mapboxgl-ctrl-group {
+          background: rgba(22, 15, 46, 0.42) !important;
+          border: 1px solid rgba(232, 212, 164, 0.45) !important;
+          box-shadow: 0 8px 20px rgba(12, 6, 28, 0.35) !important;
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          border-radius: 10px !important;
+          overflow: hidden;
+        }
+        .mapboxgl-ctrl-group button { width: 34px !important; height: 34px !important; background: transparent !important; }
+        .mapboxgl-ctrl-group button + button { border-top: 1px solid rgba(232, 212, 164, 0.25) !important; }
+        .mapboxgl-ctrl-group .mapboxgl-ctrl-icon {
+          filter: invert(95%) sepia(18%) saturate(382%) hue-rotate(355deg) brightness(101%) contrast(92%);
+          opacity: 0.95;
+        }
+
         .district-btn {
           transition: background 0.4s cubic-bezier(0.25,0.46,0.45,0.94),
                       border-left-color 0.4s cubic-bezier(0.25,0.46,0.45,0.94);
         }
         .district-btn .hood-name {
-          transition: font-style 0.35s ease, padding-left 0.35s ease, color 0.35s ease;
+          transition: font-style 0.35s ease, color 0.35s ease;
+        }
+
+        /* Sidebar polish */
+        .sidebar-panel {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(180,140,130,0.18) transparent;
+        }
+        .sidebar-panel::-webkit-scrollbar { width: 2px; }
+        .sidebar-panel::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-panel::-webkit-scrollbar-thumb { background: rgba(180,140,130,0.22); border-radius: 2px; }
+
+        @keyframes sidebarReveal {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .sidebar-section { animation: sidebarReveal 0.55s ease both; }
+        .sidebar-section:nth-child(1) { animation-delay: 0.04s; }
+        .sidebar-section:nth-child(2) { animation-delay: 0.14s; }
+        .sidebar-section:nth-child(3) { animation-delay: 0.24s; }
+        .sidebar-section:nth-child(4) { animation-delay: 0.34s; }
+
+        .district-mood {
+          max-height: 0; overflow: hidden;
+          transition: max-height 0.28s ease, opacity 0.28s ease;
+          opacity: 0;
+        }
+        .district-btn:hover .district-mood,
+        .district-btn.is-active .district-mood {
+          max-height: 20px; opacity: 1;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -857,8 +931,8 @@ export default function App() {
       {/* ── Nav (z:100) ── */}
       <nav style={{
         position: "fixed", top: 0, left: 0, right: 0, height: "58px", zIndex: 100,
-        background: "rgba(240,226,218,0.88)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-        borderBottom: "1px solid rgba(107,64,64,0.1)",
+        background: "transparent", backdropFilter: "none", WebkitBackdropFilter: "none",
+        border: "none",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 36px",
       }}>
@@ -866,27 +940,28 @@ export default function App() {
           onClick={() => navigate("/")}
           style={{
             background: "none", border: "none", cursor: "pointer", padding: 0,
-            fontFamily: "'Cormorant SC', 'Cormorant Garamond', serif", fontSize: "16px",
-            fontStyle: "normal", color: "#4a2e2e", letterSpacing: "0.28em",
-            fontWeight: 300,
+            fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem",
+            fontStyle: "italic", color: "#ffffff", letterSpacing: "-0.01em",
+            fontWeight: 400,
           }}
         >CityMood</button>
-        <div style={{ display: "flex", alignItems: "center", gap: "0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
           <span style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.22em",
-            textTransform: "uppercase", color: "rgba(107,64,64,0.28)", marginRight: "20px",
+            fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", letterSpacing: "0.08em",
+            textTransform: "uppercase", color: "rgba(255,255,255,0.5)",
+            background: "none", border: "none",
           }}>Atlas</span>
-          <span style={{ width: "1px", height: "14px", background: "rgba(107,64,64,0.14)", marginRight: "20px", display: "inline-block" }} />
           <button
             onClick={() => navigate("/try")}
             style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: "7px", letterSpacing: "0.22em",
-              textTransform: "uppercase", color: "rgba(107,64,64,0.52)",
-              background: "transparent", border: "none",
-              cursor: "pointer", transition: "color 0.3s ease", padding: 0,
+              fontFamily: "'DM Sans', sans-serif", fontSize: "0.72rem", letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "#ffffff",
+              background: "transparent", border: "1.5px solid rgba(255,255,255,0.7)",
+              borderRadius: "100px",
+              cursor: "pointer", transition: "all 0.2s ease", padding: "6px 18px",
             }}
-            onMouseEnter={e => (e.currentTarget.style.color = "rgba(107,64,64,1)")}
-            onMouseLeave={e => (e.currentTarget.style.color = "rgba(107,64,64,0.52)")}>
+            onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.1)")}
+            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
             Start your map →
           </button>
         </div>
@@ -899,100 +974,121 @@ export default function App() {
         fontFamily: "'DM Sans', sans-serif",
       }}>
         {/* ── LEFT SIDEBAR ── */}
-        <div style={{
+        <div className="sidebar-panel" style={{
           width: "30%", flexShrink: 0,
-          background: "rgba(244,232,225,0.22)",
-          overflowY: "auto", padding: "36px 28px",
-          display: "flex", flexDirection: "column", gap: "28px",
+          background: "transparent",
+          overflowY: "auto", padding: "36px 28px 40px",
+          display: "flex", flexDirection: "column", gap: "0",
           position: "relative",
+          borderRight: "0.5px solid rgba(155,48,255,0.12)",
         }}>
           {/* Hero */}
-          <div>
-            <p style={{
-              fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em",
-              textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "20px",
-              paddingBottom: "14px", borderBottom: "0.5px solid rgba(107,64,64,0.1)",
-              fontWeight: 700,
-            }}>
-              {phase.label} — New York City
-            </p>
+          <div className="sidebar-section" style={{ paddingBottom: "28px", borderBottom: "0.5px solid rgba(155,48,255,0.1)", marginBottom: "28px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "9px", marginBottom: "20px" }}>
+              <span style={{
+                width: "5px", height: "5px", borderRadius: "50%", flexShrink: 0,
+                background: phase.glowColor,
+                boxShadow: `0 0 7px ${phase.glowColor}, 0 0 14px ${phase.glowColor}`,
+                display: "inline-block",
+              }} />
+              <p style={{
+                fontFamily: "'DM Serif Text', serif", fontSize: "0.5625rem", letterSpacing: "0.34em",
+                textTransform: "uppercase", color: "rgba(255,255,255,0.5)",
+                fontWeight: 400,
+              }}>
+                {phase.label} — New York City
+              </p>
+            </div>
             <h1 style={{
-              fontFamily: "'Cormorant Garamond', serif", fontSize: "3rem", fontWeight: 300,
-              color: "#4a2c2c", letterSpacing: "-0.025em", lineHeight: 1.0,
-              marginBottom: "22px",
-            }}>New York City</h1>
+              fontFamily: "'Cormorant Garamond', serif", fontSize: "4.5rem", fontWeight: 300,
+              fontStyle: "italic", color: "#FFFFFF", letterSpacing: "-0.02em", lineHeight: 0.9,
+              marginBottom: "20px",
+            }}>New York <em style={{color:"#FFFFFF", fontStyle:"italic"}}>City</em></h1>
             <p style={{
-              fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem",
-              lineHeight: 2.2, letterSpacing: "0.07em", color: "rgba(107,64,64,0.42)",
-              paddingLeft: "12px", borderLeft: "1px solid rgba(107,64,64,0.14)",
-              fontWeight: 700,
+              fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic",
+              fontSize: "1.05rem", color: "rgba(255,255,255,0.55)", lineHeight: 1.68,
             }}>
               A personal photography atlas.<br />
               Click a district to explore.
             </p>
           </div>
 
-          <div style={{ height: "1px", background: "rgba(180,140,130,0.15)" }} />
-
           {/* Light Tracker */}
-          <div>
-            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "12px", fontWeight: 400, display: "flex", alignItems: "center", gap: "12px" }}>
+          <div className="sidebar-section" style={{ paddingBottom: "28px", borderBottom: "0.5px solid rgba(155,48,255,0.1)", marginBottom: "28px" }}>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.5625rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: "14px", fontWeight: 400, display: "flex", alignItems: "center", gap: "12px" }}>
               Light Tracker
-              <span style={{ flex: 1, height: "0.5px", background: "rgba(107,64,64,0.1)", display: "inline-block" }} />
+              <span style={{ flex: 1, height: "0.5px", background: "rgba(155,48,255,0.12)", display: "inline-block" }} />
             </p>
             <LightTracker phase={phase} prog={prog} hour={h} minute={m} />
           </div>
 
-          <div style={{ height: "1px", background: "rgba(180,140,130,0.15)" }} />
-
           {/* Districts list */}
-          <div>
-            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "4px", fontWeight: 700, display: "flex", alignItems: "center", gap: "12px" }}>
+          <div className="sidebar-section" style={{ paddingBottom: "28px", borderBottom: "0.5px solid rgba(155,48,255,0.1)", marginBottom: "28px" }}>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.5625rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: "6px", fontWeight: 700, display: "flex", alignItems: "center", gap: "12px" }}>
               Districts
-              <span style={{ flex: 1, height: "0.5px", background: "rgba(107,64,64,0.1)", display: "inline-block" }} />
+              <span style={{ flex: 1, height: "0.5px", background: "rgba(155,48,255,0.12)", display: "inline-block" }} />
             </p>
             <ul style={{ listStyle: "none" }}>
               {HOODS.map((hood, idx) => {
                 const isActive = activeId === hood.id;
+                const photoCount = photoCountByHood[hood.id] ?? 0;
                 return (
                   <li key={hood.id}>
                     <button
-                      className="district-btn"
+                      className={`district-btn${isActive ? " is-active" : ""}`}
                       onClick={() => handlePanelSelect(hood.id)}
                       style={{
                         width: "100%",
-                        background: isActive ? "rgba(180,110,90,0.06)" : "transparent",
+                        background: isActive ? "rgba(155,48,255,0.08)" : "transparent",
                         border: "none",
-                        borderLeft: isActive ? "1.5px solid rgba(143,31,23,0.38)" : "1.5px solid transparent",
-                        borderBottom: "0.5px solid rgba(107,64,64,0.07)",
+                        borderLeft: isActive ? `1.5px solid ${hood.accent}` : "1.5px solid transparent",
+                        borderBottom: "0.5px solid rgba(155,48,255,0.08)",
                         borderRadius: 0,
                         cursor: "pointer",
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "15px 0 15px 14px",
+                        display: "flex", alignItems: "center",
+                        padding: "12px 4px 12px 12px",
                         textAlign: "left",
+                        gap: "10px",
+                        opacity: 1,
                       }}
                       onMouseEnter={e => {
-                        if (!isActive) e.currentTarget.style.background = "rgba(180,110,90,0.05)";
-                        if (!isActive) e.currentTarget.style.borderLeftColor = "rgba(143,31,23,0.18)";
+                        if (!isActive) e.currentTarget.style.background = "rgba(155,48,255,0.06)";
+                        if (!isActive) e.currentTarget.style.borderLeftColor = "rgba(155,48,255,0.25)";
                         const n = e.currentTarget.querySelector(".hood-name") as HTMLElement;
-                        if (n) { n.style.fontStyle = "italic"; n.style.paddingLeft = "3px"; n.style.color = "#3a1e1e"; }
+                        if (n) { n.style.fontStyle = "italic"; n.style.color = "#EDE8F8"; }
                       }}
                       onMouseLeave={e => {
                         if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderLeftColor = "transparent"; }
                         const n = e.currentTarget.querySelector(".hood-name") as HTMLElement;
-                        if (n) { n.style.fontStyle = "normal"; n.style.paddingLeft = "0"; n.style.color = isActive ? "#3a1e1e" : "#5a3535"; }
+                        if (n) { n.style.fontStyle = "normal"; n.style.color = "rgba(255,255,255,0.8)"; }
                       }}>
-                      <span className="hood-name" style={{
-                        fontFamily: "'Cormorant Garamond', serif", fontSize: "1.05rem", fontWeight: 300,
-                        color: isActive ? "#3a1e1e" : "#5a3535", flex: 1,
-                      }}>{hood.name}</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0, marginLeft: "10px" }}>
-                        <span style={{ width: "0.5px", height: "10px", background: "rgba(107,64,64,0.14)", display: "inline-block" }} />
-                        <span style={{
-                          fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.16em",
-                          textTransform: "uppercase", color: "rgba(107,64,64,0.26)", fontWeight: 700,
-                        }}>{String(hood.photos.length).padStart(2, "0")}</span>
+                      <span style={{
+                        fontFamily: "'DM Serif Text', serif", fontSize: "0.5rem",
+                        color: "rgba(155,48,255,0.2)", letterSpacing: "0.05em", fontWeight: 400,
+                        minWidth: "16px", flexShrink: 0, paddingTop: "2px",
+                      }}>
+                        {String(idx + 1).padStart(2, "0")}
                       </span>
+                      <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0" }}>
+                        <span className="hood-name" style={{
+                          fontFamily: "'Cormorant Garamond', serif", fontSize: "1.05rem", fontWeight: 300,
+                          color: "rgba(255,255,255,0.8)",
+                          display: "block",
+                        }}>{hood.name} {`· ${photoCount}`}</span>
+                        <span className="district-mood" style={{
+                          fontFamily: "'DM Serif Text', serif", fontStyle: "italic",
+                          fontSize: "0.5625rem", color: "rgba(196,174,244,0.35)", letterSpacing: "0.02em",
+                          display: "block",
+                        }}>{hood.mood}</span>
+                      </span>
+                      {isActive && (
+                        <span style={{
+                          width: "4px", height: "4px", borderRadius: "50%", flexShrink: 0, marginRight: "2px",
+                          background: hood.accent,
+                          boxShadow: `0 0 5px ${hood.glow}`,
+                          display: "inline-block",
+                        }} />
+                      )}
                     </button>
                   </li>
                 );
@@ -1000,68 +1096,79 @@ export default function App() {
             </ul>
           </div>
 
-          <div style={{ height: "1px", background: "rgba(180,140,130,0.15)" }} />
-
           {/* Coordinates */}
-          <div>
-            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", letterSpacing: "0.38em", textTransform: "uppercase", color: "rgba(107,64,64,0.32)", marginBottom: "12px", fontWeight: 700, display: "flex", alignItems: "center", gap: "12px" }}>
+          <div className="sidebar-section">
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.5625rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: "12px", fontWeight: 700, display: "flex", alignItems: "center", gap: "12px" }}>
               Coordinates
-              <span style={{ flex: 1, height: "0.5px", background: "rgba(107,64,64,0.1)", display: "inline-block" }} />
+              <span style={{ flex: 1, height: "0.5px", background: "rgba(155,48,255,0.12)", display: "inline-block" }} />
             </p>
-            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", fontWeight: 700, color: "rgba(107,64,64,0.6)", letterSpacing: "0.08em" }}>40.7128° N · 74.0060° W</p>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.625rem", fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em" }}>40.7128° N · 74.0060° W</p>
+            <p style={{ fontFamily: "'DM Serif Text', serif", fontSize: "0.5rem", color: "rgba(255,255,255,0.4)", letterSpacing: "0.18em", textTransform: "uppercase", marginTop: "5px" }}>New York, USA</p>
           </div>
         </div>
 
         {/* ── RIGHT MAP PANEL ── */}
-        <div style={{ width: "70%", flexShrink: 0, position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", inset: 0 }}>
-            <NYCMap activeId={activeId} onSelect={handleSelect} onDeselect={handleDeselect} onExplore={id => setGalleryId(id)} svgRef={svgRef} />
+        <div style={{ width: "70%", flexShrink: 0, position: "relative", overflow: "hidden", background: "transparent" }}>
+          <div style={{ position: "absolute", inset: 0, background: "transparent" }}>
+            <AtlasStyledMap
+              litIds={selectableIds}
+              selectableIds={selectableIds}
+              glowWeightsBySlug={Object.fromEntries(
+                selectableIds.map((id) => {
+                  const count = photoCountByHood[id] ?? 0;
+                  const normalized = Math.log2(count + 1) / Math.log2(maxPhotoCount + 1);
+                  return [id, 0.9 + normalized * 2.3];
+                }),
+              )}
+              activeId={activeId}
+              onSelect={handleSelect}
+              onBackgroundClick={handleDeselect}
+              photoPoints={[]}
+              representativePhotos={[]}
+              showMarkers={false}
+              lockOverviewMinZoom
+              markerStartOffset={0.35}
+              detailPinZoom={13.2}
+            />
           </div>
 
           {/* Floating card near clicked block */}
           {floatingCard && (() => {
             const fh = HOODS.find(n => n.id === floatingCard.id);
             if (!fh) return null;
-            const showLeft = floatingCard.x > window.innerWidth * 0.65;
-            const shiftUp = floatingCard.y > window.innerHeight * 0.7;
             return (
               <div key={fh.id} style={{
                 position: "fixed",
-                left: showLeft ? floatingCard.x - 20 : floatingCard.x + 20,
-                top: shiftUp ? floatingCard.y - 20 : floatingCard.y,
-                transform: `translate(${showLeft ? "-100%" : "0"}, ${shiftUp ? "-100%" : "0"})`,
+                top: "12vh",
+                left: "max(420px, 55%)",
+                transform: "translateX(-50%)",
                 zIndex: 50,
-                background: "rgba(18,12,6,0.88)",
+                background: "rgba(10,8,20,0.92)",
                 backdropFilter: "blur(16px)",
                 WebkitBackdropFilter: "blur(16px)",
-                borderRadius: "12px",
-                border: "0.5px solid rgba(255,255,255,0.08)",
-                padding: "20px 22px",
-                minWidth: "200px",
-                maxWidth: "240px",
+                borderRadius: "10px",
+                border: "0.5px solid rgba(155,48,255,0.25)",
+                padding: "24px 28px",
+                minWidth: "240px",
+                maxWidth: "260px",
                 pointerEvents: "auto",
                 animation: "fadeIn 0.2s ease",
+                boxShadow: "0 2px 24px rgba(155,48,255,0.1)",
               }}>
-                <div style={{ width: "24px", height: "2px", background: "#DD9389", marginBottom: "12px" }} />
-                <div style={{ fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(245,230,200,0.4)", marginBottom: "4px", fontFamily: "'DM Sans', sans-serif" }}>{fh.borough}</div>
-                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.2rem", color: "#f5e6c8", marginBottom: "4px" }}>{fh.name}</div>
-                <div style={{ fontSize: "0.58rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(245,230,200,0.35)", marginBottom: "16px", fontFamily: "'DM Sans', sans-serif" }}>{fh.mood}</div>
-                <button
-                  onClick={() => setGalleryId(fh.id)}
-                  style={{
-                    width: "100%", padding: "9px 0",
-                    border: "0.5px solid rgba(245,230,200,0.2)",
-                    borderRadius: "6px",
-                    color: "rgba(245,230,200,0.7)",
-                    fontSize: "0.7rem", letterSpacing: "0.08em", textTransform: "uppercase",
-                    background: "transparent", cursor: "pointer",
-                    fontFamily: "'DM Sans', sans-serif",
-                    transition: "background 0.2s",
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.06)")}
-                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                  VIEW GALLERY →
-                </button>
+                <div style={{ fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(155,48,255,0.4)", marginBottom: "6px", fontFamily: "'DM Sans', sans-serif" }}>{fh.borough}</div>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic", fontSize: "2rem", color: "#EDE8F8", marginBottom: "6px", lineHeight: 1 }}>{fh.name}</div>
+                <div style={{ fontSize: "0.58rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(196,174,244,0.4)", marginBottom: "16px", fontFamily: "'DM Sans', sans-serif" }}>{fh.mood}</div>
+                <div style={{ borderTop: "0.5px solid rgba(155,48,255,0.15)", paddingTop: "14px" }}>
+                  <button
+                    onClick={() => setGalleryId(fh.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "10px",
+                      background: "transparent", border: "none", cursor: "pointer", padding: 0,
+                    }}>
+                    <span style={{ width: "24px", height: "1px", background: "#FFD700", display: "inline-block", flexShrink: 0 }} />
+                    <span style={{ color: "#FFD700", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif" }}>View Gallery</span>
+                  </button>
+                </div>
               </div>
             );
           })()}
@@ -1070,7 +1177,16 @@ export default function App() {
 
       {/* ── Gallery Modal ── */}
       {galleryHood && (
-        <GalleryModal hood={galleryHood} onClose={() => setGalleryId(null)} />
+        <NeighborhoodGallery
+          neighborhoodName={galleryHood.name}
+          borough={galleryHood.borough}
+          moodTag={galleryHood.mood}
+          photos={getNeighborhoodPhotos(galleryHood.id).map((url, i) => ({
+            url,
+            note: galleryHood.photos[i]?.caption,
+          }))}
+          onBack={() => setGalleryId(null)}
+        />
       )}
     </>
   );

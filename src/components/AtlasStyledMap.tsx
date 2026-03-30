@@ -1,0 +1,454 @@
+import { useEffect, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+
+export type MapPhotoPoint = {
+  id: string;
+  neighborhoodSlug: string;
+  url: string;
+  lat: number | null;
+  lng: number | null;
+};
+
+export type RepresentativePhoto = {
+  hoodId: string;
+  url: string;
+  lat: number;
+  lng: number;
+};
+
+const REGION_BOUNDS: [[number, number], [number, number]] = [
+  [-74.055, 40.675],
+  [-73.845, 40.895],
+];
+
+const BROOKLYN_NEAR_MANHATTAN_NTAS = [
+  "Brooklyn Heights",
+  "Downtown Brooklyn-DUMBO-Boerum Hill",
+  "Fort Greene",
+  "Clinton Hill",
+  "Carroll Gardens-Cobble Hill-Gowanus-Red Hook",
+  "Williamsburg",
+  "South Williamsburg",
+  "East Williamsburg",
+  "Greenpoint",
+];
+
+const TRANSPARENT_STREETS_STYLE: mapboxgl.StyleSpecification = {
+  version: 8,
+  glyphs: "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
+  sources: {
+    streets: { type: "vector", url: "mapbox://mapbox.mapbox-streets-v8" },
+  },
+  layers: [],
+};
+
+const STREET_DETAIL_ZOOM = 12.8;
+
+export default function AtlasStyledMap({
+  litIds,
+  selectableIds,
+  activeId,
+  onSelect,
+  onBackgroundClick,
+  photoPoints,
+  representativePhotos,
+  glowWeightsBySlug,
+  showMarkers = true,
+  lockOverviewMinZoom = false,
+  markerStartOffset = 0.45,
+  detailPinZoom = 13.2,
+}: {
+  litIds: string[];
+  selectableIds?: string[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  onBackgroundClick?: () => void;
+  photoPoints: MapPhotoPoint[];
+  representativePhotos: RepresentativePhoto[];
+  glowWeightsBySlug?: Record<string, number>;
+  showMarkers?: boolean;
+  lockOverviewMinZoom?: boolean;
+  markerStartOffset?: number;
+  detailPinZoom?: number;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const overviewZoomRef = useRef<number>(10.8);
+  const onSelectRef = useRef(onSelect);
+  const onBackgroundClickRef = useRef(onBackgroundClick);
+  const selectableIdsRef = useRef<string[]>(selectableIds ?? litIds);
+  const [pulse, setPulse] = useState(0.5);
+  const [mapReady, setMapReady] = useState(false);
+  const [zoom, setZoom] = useState(11.6);
+  const mapToken = (import.meta.env.NEXT_PUBLIC_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_TOKEN || "").trim();
+
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+    onBackgroundClickRef.current = onBackgroundClick;
+  }, [onBackgroundClick, onSelect]);
+
+  useEffect(() => {
+    selectableIdsRef.current = selectableIds ?? litIds;
+  }, [selectableIds, litIds]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const t = Date.now() / 900;
+      setPulse((Math.sin(t) + 1) / 2);
+    }, 120);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const selectableSet = new Set(selectableIds ?? litIds);
+  const glowWeights = glowWeightsBySlug ?? Object.fromEntries((selectableIds ?? litIds).map(id => [id, 1]));
+  const buildMatch = (fallback: number) => {
+    const expression: (string | number)[] = ["match", ["get", "slug"]];
+    Object.entries(glowWeights).forEach(([slug, value]) => {
+      expression.push(slug, Math.max(0.1, Math.min(3.2, value)));
+    });
+    expression.push(fallback);
+    return expression as mapboxgl.Expression;
+  };
+
+  const buildColorMatch = (fallback: string) => {
+    const expression: (string | mapboxgl.Expression)[] = ["match", ["get", "slug"]];
+    Object.entries(glowWeights).forEach(([slug, value]) => {
+      if (value >= 2.35) expression.push(slug, "rgba(255, 236, 168, 1)");
+      else if (value >= 1.7) expression.push(slug, "rgba(255, 223, 146, 0.98)");
+      else if (value >= 1.2) expression.push(slug, "rgba(248, 205, 123, 0.95)");
+      else expression.push(slug, "rgba(242, 188, 108, 0.9)");
+    });
+    expression.push(fallback);
+    return expression as mapboxgl.Expression;
+  };
+
+  const clearMarkers = () => {
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+  };
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current || !mapToken) return;
+    mapboxgl.accessToken = mapToken;
+    const map = new mapboxgl.Map({
+      container: containerRef.current,
+      style: TRANSPARENT_STREETS_STYLE,
+      center: [-73.9855, 40.744],
+      zoom: 11.2,
+      minZoom: lockOverviewMinZoom ? 0 : 9.4,
+      maxZoom: 16.2,
+      pitch: 0,
+      bearing: 0,
+      attributionControl: false,
+    });
+    mapRef.current = map;
+    map.setMaxBounds(REGION_BOUNDS);
+
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
+    map.on("zoomend", () => setZoom(map.getZoom()));
+
+    const enforceFullViewMinZoom = () => {
+      if (!lockOverviewMinZoom) return;
+      const camera = map.cameraForBounds(REGION_BOUNDS, { padding: 14 });
+      if (!camera || typeof camera.zoom !== "number") return;
+      overviewZoomRef.current = camera.zoom;
+      map.setMinZoom(overviewZoomRef.current);
+      if (map.getZoom() < overviewZoomRef.current) {
+        map.jumpTo({ zoom: overviewZoomRef.current });
+      }
+    };
+    map.on("resize", enforceFullViewMinZoom);
+
+    map.on("load", () => {
+      map.addLayer({
+        id: "base-street-lines",
+        type: "line",
+        source: "streets",
+        "source-layer": "road",
+        minzoom: STREET_DETAIL_ZOOM,
+        paint: {
+          "line-color": "rgba(233, 214, 182, 0.85)",
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            STREET_DETAIL_ZOOM, 0.35,
+            14.2, 0.8,
+            16, 1.45,
+          ],
+          "line-opacity": [
+            "interpolate", ["linear"], ["zoom"],
+            STREET_DETAIL_ZOOM, 0,
+            STREET_DETAIL_ZOOM + 0.45, 0.24,
+            16, 0.46,
+          ],
+        },
+      });
+
+      map.addSource("hoods-all", {
+        type: "geojson",
+        data: "/nyc-neighborhoods.geojson",
+      });
+
+      const regionalFilter: mapboxgl.Expression = [
+        "any",
+        ["==", ["get", "boroname"], "Manhattan"],
+        [
+          "all",
+          ["==", ["get", "boroname"], "Brooklyn"],
+          ["in", ["get", "ntaname"], ["literal", BROOKLYN_NEAR_MANHATTAN_NTAS]],
+        ],
+      ];
+
+      map.addLayer({
+        id: "hoods-all-line-glow",
+        type: "line",
+        source: "hoods-all",
+        filter: regionalFilter,
+        paint: {
+          "line-color": "rgba(240, 183, 93, 0.35)",
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            10.6, 1.5,
+            13.2, 2.6,
+            16, 4.2,
+          ],
+          "line-blur": 1.2,
+          "line-opacity": 0.7,
+        },
+      });
+
+      map.addLayer({
+        id: "hoods-all-line-main",
+        type: "line",
+        source: "hoods-all",
+        filter: regionalFilter,
+        paint: {
+          "line-color": "rgba(244, 194, 109, 0.55)",
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            10.6, 0.7,
+            13.2, 1.2,
+            16, 2,
+          ],
+          "line-opacity": 0.8,
+        },
+      });
+
+      map.addSource("hoods", {
+        type: "geojson",
+        data: "/nyc-neighborhoods-filtered.geojson",
+      });
+
+      map.addLayer({
+        id: "hoods-hit",
+        type: "fill",
+        source: "hoods",
+        paint: { "fill-opacity": 0 },
+      });
+
+      map.addLayer({
+        id: "hoods-line-glow",
+        type: "line",
+        source: "hoods",
+        filter: ["in", ["get", "slug"], ["literal", Array.from(selectableSet)]],
+        paint: {
+          "line-color": "rgba(246, 206, 118, 0.45)",
+          "line-width": [
+            "*",
+            buildMatch(0.85),
+            ["interpolate", ["linear"], ["zoom"], 10.6, 1.8, 13.2, 3.2, 16, 4.9],
+          ],
+          "line-blur": 1.5,
+          "line-opacity": 0.75,
+        },
+      });
+
+      map.addLayer({
+        id: "hoods-line-main",
+        type: "line",
+        source: "hoods",
+        paint: {
+          "line-color": [
+            "case",
+            ["in", ["get", "slug"], ["literal", Array.from(selectableSet)]],
+            "rgba(254, 222, 139, 0.95)",
+            "rgba(112, 87, 150, 0.22)",
+          ],
+          "line-width": [
+            "*",
+            buildMatch(0.7),
+            ["interpolate", ["linear"], ["zoom"], 10.6, 0.85, 13.2, 1.35, 16, 2.1],
+          ],
+          "line-opacity": [
+            "case",
+            ["in", ["get", "slug"], ["literal", Array.from(selectableSet)]],
+            0.94,
+            0.38,
+          ],
+        },
+      });
+
+      map.addLayer({
+        id: "hoods-line-active",
+        type: "line",
+        source: "hoods",
+        filter: ["==", ["get", "slug"], ""],
+        paint: {
+          "line-color": "rgba(255, 242, 184, 0.98)",
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            10.6, 1.6,
+            13.2, 2.4,
+            16, 3.3,
+          ],
+          "line-opacity": 1,
+        },
+      });
+
+      map.on("click", (e) => {
+        const features = map.queryRenderedFeatures(e.point, { layers: ["hoods-hit"] });
+        const slug = features[0]?.properties?.slug as string | undefined;
+        if (slug && selectableIdsRef.current.includes(slug)) onSelectRef.current(slug);
+        else onBackgroundClickRef.current?.();
+      });
+      map.on("mousemove", "hoods-hit", (e) => {
+        const slug = e.features?.[0]?.properties?.slug as string | undefined;
+        map.getCanvas().style.cursor = slug && selectableIdsRef.current.includes(slug) ? "pointer" : "";
+      });
+      map.on("mouseleave", "hoods-hit", () => { map.getCanvas().style.cursor = ""; });
+
+      map.fitBounds(REGION_BOUNDS, { padding: 14, duration: 0 });
+      enforceFullViewMinZoom();
+      requestAnimationFrame(enforceFullViewMinZoom);
+      setZoom(map.getZoom());
+      setMapReady(true);
+    });
+
+    return () => {
+      clearMarkers();
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [lockOverviewMinZoom, mapToken]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (map.getLayer("hoods-line-main")) {
+      map.setPaintProperty("hoods-line-main", "line-color", [
+        "case",
+        ["in", ["get", "slug"], ["literal", selectableIds ?? litIds]],
+        buildColorMatch("rgba(254, 222, 139, 0.95)"),
+        "rgba(112, 87, 150, 0.22)",
+      ]);
+      map.setPaintProperty("hoods-line-main", "line-width", [
+        "*",
+        buildMatch(0.82),
+        ["interpolate", ["linear"], ["zoom"], 10.6, 0.95, 13.2, 1.55, 16, 2.35],
+      ]);
+      map.setPaintProperty("hoods-line-main", "line-opacity", [
+        "case",
+        ["in", ["get", "slug"], ["literal", selectableIds ?? litIds]],
+        ["*", 0.46 + pulse * 0.42, buildMatch(0.95)],
+        0.1,
+      ]);
+    }
+    if (map.getLayer("hoods-line-active")) {
+      map.setFilter("hoods-line-active", ["==", ["get", "slug"], activeId ?? ""]);
+    }
+    if (map.getLayer("hoods-line-glow")) {
+      map.setFilter("hoods-line-glow", ["in", ["get", "slug"], ["literal", selectableIds ?? litIds]]);
+      map.setPaintProperty("hoods-line-glow", "line-width", [
+        "*",
+        buildMatch(1),
+        ["interpolate", ["linear"], ["zoom"], 10.6, 2.1, 13.2, 3.7, 16, 5.8],
+      ]);
+      map.setPaintProperty("hoods-line-glow", "line-opacity", [
+        "*",
+        0.2 + pulse * 0.68,
+        buildMatch(1.05),
+      ]);
+    }
+  }, [activeId, litIds, mapReady, selectableIds, glowWeightsBySlug, pulse]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    clearMarkers();
+    if (!showMarkers) return;
+
+    const markerStartZoom = overviewZoomRef.current + markerStartOffset;
+    if (zoom < markerStartZoom) return;
+
+    const showDetailedPins = zoom >= detailPinZoom;
+    if (!showDetailedPins) {
+      representativePhotos.forEach(rep => {
+        if (!litIds.includes(rep.hoodId)) return;
+        const el = document.createElement("div");
+        el.style.width = "30px";
+        el.style.height = "30px";
+        el.style.borderRadius = "8px";
+        el.style.overflow = "hidden";
+        el.style.border = activeId === rep.hoodId ? "1.8px solid #FFD700" : "1px solid rgba(255,255,255,0.4)";
+        el.style.boxShadow = "0 3px 10px rgba(0,0,0,0.35)";
+        el.style.background = "rgba(9,7,16,0.9)";
+        el.style.cursor = "pointer";
+        el.innerHTML = `<img src="${rep.url}" alt="" style="width:100%;height:100%;object-fit:cover;" />`;
+        el.onclick = () => onSelect(rep.hoodId);
+        const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
+          .setLngLat([rep.lng, rep.lat])
+          .addTo(map);
+        markersRef.current.push(marker);
+      });
+      return;
+    }
+
+    photoPoints.forEach(point => {
+      if (!litIds.includes(point.neighborhoodSlug)) return;
+      if (point.lat === null || point.lng === null) return;
+      const el = document.createElement("div");
+      el.style.width = "14px";
+      el.style.height = "14px";
+      el.style.borderRadius = "999px";
+      el.style.border = "1.5px solid rgba(255,215,0,0.95)";
+      el.style.background = "rgba(255,215,0,0.24)";
+      el.style.boxShadow = "0 0 0 3px rgba(255,215,0,0.09)";
+      el.style.cursor = "pointer";
+      el.onclick = () => onSelect(point.neighborhoodSlug);
+      const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
+        .setLngLat([point.lng, point.lat])
+        .addTo(map);
+      markersRef.current.push(marker);
+    });
+  }, [activeId, detailPinZoom, litIds, mapReady, markerStartOffset, onSelect, photoPoints, representativePhotos, showMarkers, zoom]);
+
+  if (!mapToken) {
+    return (
+      <div style={{
+        width: "100%", height: "100%", display: "flex",
+        alignItems: "center", justifyContent: "center",
+        background: "rgba(8,6,16,0.7)", color: "rgba(225,211,246,0.8)",
+        fontFamily: "'DM Sans', sans-serif", fontSize: "0.85rem", letterSpacing: "0.02em",
+      }}>
+        Missing Mapbox token. Set `NEXT_PUBLIC_MAPBOX_TOKEN` in `.env.local`.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        background: [
+          "radial-gradient(circle at 18% 18%, rgba(190,170,230,0.12), transparent 42%)",
+          "radial-gradient(circle at 78% 72%, rgba(140,110,180,0.12), transparent 45%)",
+        ].join(","),
+        mixBlendMode: "screen",
+      }} />
+    </div>
+  );
+}

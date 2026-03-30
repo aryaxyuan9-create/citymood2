@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import * as exifr from "exifr";
 import ShaderBackground from "../components/home/ShaderBackground";
 import { supabase } from "../lib/supabase";
+import AtlasStyledMap, { type MapPhotoPoint, type RepresentativePhoto } from "../components/AtlasStyledMap";
 
 // ─────────────────────────────────────────────
 //  Neighborhood data
@@ -32,9 +34,39 @@ const HOODS = [
     path: `M 201.6 458.9 L 197.0 467.0 L 197.9 469.5 L 194.6 470.2 L 196.5 473.4 L 196.1 482.4 L 197.5 490.0 L 201.2 493.4 L 188.5 493.0 L 188.4 494.8 L 191.3 494.8 L 190.2 499.4 L 192.7 503.2 L 184.6 503.2 L 194.8 506.2 L 205.3 517.1 L 199.5 523.8 L 166.5 514.4 L 163.3 518.0 L 145.0 512.8 L 151.0 503.9 L 158.1 505.4 L 162.9 500.3 L 164.0 497.2 L 156.2 496.0 L 158.3 492.4 L 155.1 484.8 L 154.5 480.1 L 156.6 473.5 L 150.0 469.7 L 140.7 466.7 L 142.2 465.9 L 140.9 465.3 L 141.8 463.6 L 151.9 462.4 L 152.9 464.1 L 156.3 464.2 L 159.1 461.7 L 166.4 462.8 L 166.5 461.4 L 167.7 461.2 L 173.2 461.6 L 173.5 460.6 L 184.9 459.8 L 194.5 460.5 L 194.5 459.0 L 201.6 458.9 Z` },
   { slug: "williamsburg", name: "Williamsburg", borough: "Brooklyn", mood: "Loud & searching", accent: "#d8b8a0", lx: 263.2, ly: 433.7,
     path: `M 281.2 407.9 L 294.0 413.3 L 305.9 410.4 L 309.7 415.4 L 315.7 413.1 L 318.2 424.4 L 322.8 424.1 L 298.9 436.5 L 314.6 436.5 L 317.3 448.5 L 308.9 449.1 L 311.3 460.2 L 282.1 452.1 L 280.0 455.3 L 261.6 454.0 L 242.2 456.5 L 238.8 455.8 L 236.6 453.2 L 236.3 449.7 L 237.6 447.0 L 235.8 446.5 L 238.4 444.9 L 236.4 444.2 L 239.0 444.3 L 240.4 440.6 L 242.0 439.6 L 240.4 438.8 L 246.5 428.4 L 254.6 422.2 L 254.1 419.7 L 257.1 420.0 L 263.6 413.5 L 267.8 406.6 L 266.1 405.9 L 269.7 405.5 L 281.2 407.9 Z M 311.3 460.2 L 342.9 473.4 L 263.3 480.8 L 265.8 474.8 L 246.7 463.6 L 242.2 456.5 L 261.6 454.0 L 280.0 455.3 L 282.1 452.1 L 311.3 460.2 Z` },
+  { slug: "washington-heights", name: "Washington Heights", borough: "Manhattan", mood: "Vibrant & uptown", accent: "#c8a090", lx: 355, ly: 82,
+    path: `M 311.4 104.1 L 326.9 77.6 L 323.7 59.4 L 379.3 6.1 L 393.2 14.4 L 415.4 36.2 L 383.0 67.8 L 348.9 114.7 L 311.4 104.1 Z` },
+  { slug: "upper-east-side", name: "Upper East Side", borough: "Manhattan", mood: "Refined & composed", accent: "#b8c8a8", lx: 335, ly: 235,
+    path: `M 373.7 145.4 L 392.0 195.9 L 388.9 212.9 L 355.4 222.3 L 318.6 204.1 L 373.7 145.4 Z M 318.6 204.1 L 346.3 219.5 L 369.1 221.9 L 365.5 243.3 L 336.4 246.9 L 336.5 253.8 L 342.3 265.4 L 321.7 281.5 L 290.2 232.3 L 318.6 204.1 Z` },
+  { slug: "central-park", name: "Central Park", borough: "Manhattan", mood: "Open & breathing", accent: "#90c0a0", lx: 253, ly: 248,
+    path: `M 315.1 207.6 L 224.6 297.7 L 192.3 287.7 L 281.1 197.3 L 315.1 207.6 Z` },
+  { slug: "lower-east-side", name: "Lower East Side", borough: "Manhattan", mood: "Gritty & alive", accent: "#d4a8b0", lx: 248, ly: 420,
+    path: `M 229.3 404.0 L 265.3 382.1 L 268.0 403.9 L 266.1 405.9 L 242.2 456.5 L 222.5 424.0 L 229.3 404.0 Z` },
 ] as const;
 
 type Slug = typeof HOODS[number]["slug"];
+
+const MAP_VIEWBOX = { minX: 0, minY: 0, width: 430, height: 560 };
+const NYC_BOUNDS = { minLat: 40.675, maxLat: 40.895, minLng: -74.055, maxLng: -73.845 };
+
+const HOOD_CENTER_COORDS: Record<Slug, { lat: number; lng: number }> = {
+  financial: { lat: 40.7075, lng: -74.0113 },
+  soho: { lat: 40.7233, lng: -74.0030 },
+  westvillage: { lat: 40.7359, lng: -74.0036 },
+  eastvillage: { lat: 40.7265, lng: -73.9815 },
+  "greenwich-village": { lat: 40.7336, lng: -74.0027 },
+  chelsea: { lat: 40.7465, lng: -74.0014 },
+  midtown: { lat: 40.7549, lng: -73.9840 },
+  upperwest: { lat: 40.7870, lng: -73.9754 },
+  harlem: { lat: 40.8116, lng: -73.9465 },
+  gramercy: { lat: 40.7376, lng: -73.9857 },
+  dumbo: { lat: 40.7033, lng: -73.9881 },
+  williamsburg: { lat: 40.7081, lng: -73.9571 },
+  "washington-heights": { lat: 40.8460, lng: -73.9360 },
+  "upper-east-side": { lat: 40.7736, lng: -73.9566 },
+  "central-park": { lat: 40.7829, lng: -73.9654 },
+  "lower-east-side": { lat: 40.7150, lng: -73.9843 },
+};
 
 function getHood(slug: string | null) {
   return HOODS.find(h => h.slug === slug) ?? null;
@@ -49,20 +81,108 @@ function getMoodTag(slug: string | null) {
   return getHood(slug)?.mood ?? "";
 }
 
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
+
+function latLngToMap(lat: number, lng: number): { x: number; y: number } {
+  const x =
+    MAP_VIEWBOX.minX +
+    ((lng - NYC_BOUNDS.minLng) / (NYC_BOUNDS.maxLng - NYC_BOUNDS.minLng)) * MAP_VIEWBOX.width;
+  const y =
+    MAP_VIEWBOX.minY +
+    (1 - (lat - NYC_BOUNDS.minLat) / (NYC_BOUNDS.maxLat - NYC_BOUNDS.minLat)) * MAP_VIEWBOX.height;
+  return {
+    x: clamp(x, MAP_VIEWBOX.minX, MAP_VIEWBOX.minX + MAP_VIEWBOX.width),
+    y: clamp(y, MAP_VIEWBOX.minY, MAP_VIEWBOX.minY + MAP_VIEWBOX.height),
+  };
+}
+
+function mapToLatLng(x: number, y: number): { lat: number; lng: number } {
+  const nx = clamp((x - MAP_VIEWBOX.minX) / MAP_VIEWBOX.width, 0, 1);
+  const ny = clamp((y - MAP_VIEWBOX.minY) / MAP_VIEWBOX.height, 0, 1);
+  const lng = NYC_BOUNDS.minLng + nx * (NYC_BOUNDS.maxLng - NYC_BOUNDS.minLng);
+  const lat = NYC_BOUNDS.minLat + (1 - ny) * (NYC_BOUNDS.maxLat - NYC_BOUNDS.minLat);
+  return { lat, lng };
+}
+
 // ─────────────────────────────────────────────
 //  Storage
 // ─────────────────────────────────────────────
 const DRAFT_KEY = "citymood-draft";
 
-type MemoryStore = Record<string, { photoUrls: string[]; notes: string[] }>;
+type PhotoLocationSource = "exif" | "manual" | "none";
+
+type PhotoMemory = {
+  url: string;
+  note: string;
+  capturedAt: string | null;
+  lat: number | null;
+  lng: number | null;
+  locationSource: PhotoLocationSource;
+  manualOverride: boolean;
+  manualPlaceName: string;
+};
+
+type MemoryStore = Record<string, { photos: PhotoMemory[] }>;
 
 function loadDraft(): MemoryStore {
   try {
     const raw = sessionStorage.getItem(DRAFT_KEY);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([slug, value]) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          Array.isArray((value as { photos?: unknown[] }).photos)
+        ) {
+          return [slug, value as { photos: PhotoMemory[] }];
+        }
+        if (
+          value &&
+          typeof value === "object" &&
+          Array.isArray((value as { photoUrls?: string[] }).photoUrls) &&
+          Array.isArray((value as { notes?: string[] }).notes)
+        ) {
+          const legacy = value as { photoUrls: string[]; notes: string[] };
+          return [
+            slug,
+            {
+              photos: legacy.photoUrls.map((url, idx) => ({
+                url,
+                note: legacy.notes[idx] ?? "",
+                capturedAt: null,
+                lat: null,
+                lng: null,
+                locationSource: "none" as PhotoLocationSource,
+                manualOverride: false,
+                manualPlaceName: "",
+              })),
+            },
+          ];
+        }
+        return [slug, { photos: [] }];
+      }),
+    );
   } catch {
     return {};
   }
+}
+
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function localInputToIso(input: string): string | null {
+  if (!input) return null;
+  const date = new Date(input);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 // ─────────────────────────────────────────────
@@ -81,6 +201,9 @@ function NycMap({
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [hoverTip, setHoverTip] = useState<{ slug: string; x: number; y: number } | null>(null);
+  const atlasLine = "rgba(244,194,109,0.58)";
+  const atlasHover = "rgba(254,222,139,0.95)";
+  const atlasActive = "rgba(255,242,184,0.98)";
 
   const manhattanOutline = `M 118.9 491.2 L 110.4 489.8 L 118.9 491.2 Z M 128.1 480.7 L 117.9 481.2 L 128.1 480.7 Z M 129.5 478.7 L 121.8 476.8 L 129.5 478.7 Z M 136.0 471.4 L 129.0 471.2 L 140.4 467.1 L 136.0 471.4 Z M 75.0 423.2 L 69.7 437.6 L 105.6 439.7 L 125.2 453.3 L 90.1 473.5 L 69.8 475.0 L 67.5 462.8 L 48.3 458.5 L 58.3 423.9 L 75.0 423.2 Z M 124.5 426.9 L 116.5 448.2 L 69.7 437.6 L 75.1 422.7 L 59.6 419.0 L 72.4 419.2 L 62.2 416.7 L 74.2 415.9 L 80.7 404.1 L 124.5 426.9 Z M 80.3 518.2 L 90.8 513.6 L 80.3 518.2 Z M 102.8 509.6 L 92.1 510.2 L 102.8 509.6 Z M 107.3 506.0 L 96.1 506.3 L 107.3 506.0 Z M 101.6 500.0 L 110.6 501.8 L 101.6 500.0 Z M -45.1 502.5 L -59.8 503.2 L -45.1 502.5 Z M 114.4 497.9 L 103.6 498.1 L 114.4 497.9 Z M 58.1 493.8 L 76.8 496.1 L 75.0 505.0 L 34.1 522.6 L 21.0 516.5 L 58.1 493.8 Z M 116.0 495.3 L 106.6 494.1 L 116.0 495.3 Z M -30.2 472.9 L -23.6 479.9 L -44.3 480.8 L -30.2 472.9 Z M 59.6 462.0 L 67.6 462.9 L 67.8 475.1 L 53.8 465.6 L 59.6 462.0 Z M 111.2 397.0 L 150.0 408.6 L 136.9 430.5 L 64.0 402.5 L 111.2 397.0 Z M 160.3 380.2 L 150.0 408.6 L 111.2 397.0 L 133.9 372.1 L 160.3 380.2 Z M 87.1 357.9 L 133.9 372.1 L 111.2 397.0 L 67.1 396.7 L 80.0 386.0 L 68.6 383.2 L 81.1 382.9 L 82.3 367.1 L 73.7 362.7 L 87.1 357.9 Z M 180.9 449.1 L 125.2 453.3 L 115.9 437.5 L 141.7 424.3 L 177.7 435.4 L 180.9 449.1 Z M 216.8 423.5 L 210.1 443.8 L 180.9 449.1 L 177.7 435.4 L 141.7 424.3 L 150.0 408.6 L 216.8 423.5 Z M 229.3 404.0 L 222.5 424.0 L 150.0 408.6 L 160.3 380.2 L 229.3 404.0 Z M 115.1 303.2 L 153.7 324.1 L 132.9 344.9 L 154.5 351.5 L 133.9 372.1 L 75.7 355.0 L 88.0 354.0 L 77.0 349.3 L 85.9 348.9 L 77.8 346.5 L 86.7 346.1 L 78.5 343.7 L 87.4 343.3 L 79.2 340.8 L 89.8 331.2 L 83.9 329.0 L 103.6 315.6 L 95.2 311.6 L 115.1 303.2 Z M 136.7 272.8 L 189.0 289.1 L 153.7 324.1 L 138.0 319.3 L 139.1 310.5 L 107.6 299.6 L 123.3 299.7 L 113.2 294.1 L 126.1 296.9 L 115.9 290.2 L 129.2 293.3 L 119.4 286.7 L 132.7 289.8 L 122.9 283.2 L 133.0 285.4 L 125.6 280.6 L 135.9 282.4 L 141.2 277.7 L 133.0 274.8 L 143.0 275.3 L 136.7 272.8 Z M 194.8 343.4 L 160.3 380.2 L 133.9 372.1 L 154.5 351.5 L 132.9 344.9 L 146.8 331.1 L 194.8 343.4 Z M 224.6 297.7 L 236.8 301.5 L 194.8 343.4 L 146.8 331.1 L 190.0 288.1 L 224.6 297.7 Z M 216.8 377.6 L 229.9 401.8 L 188.3 388.7 L 203.6 373.4 L 216.8 377.6 Z M 203.6 373.4 L 188.3 388.7 L 160.3 380.2 L 182.5 355.6 L 203.6 373.4 Z M 266.6 388.1 L 260.0 388.5 L 266.6 388.1 Z M 213.0 333.2 L 244.0 342.8 L 228.9 357.3 L 226.6 376.4 L 219.3 374.7 L 224.9 378.4 L 187.9 366.2 L 194.7 359.3 L 182.5 355.6 L 213.0 333.2 Z M 249.1 305.2 L 279.9 313.5 L 240.2 336.8 L 204.3 330.5 L 236.8 301.5 L 249.1 305.2 Z M 253.9 331.8 L 236.1 340.3 L 253.9 331.8 Z M 217.0 261.0 L 189.0 289.1 L 136.2 271.4 L 145.0 273.1 L 167.1 250.3 L 217.0 261.0 Z M 258.2 220.0 L 217.0 261.0 L 167.1 250.3 L 211.7 203.7 L 258.2 220.0 Z M 275.5 195.7 L 258.2 220.0 L 211.7 203.7 L 231.9 182.9 L 275.5 195.7 Z M 343.4 284.5 L 268.3 337.9 L 350.0 273.8 L 343.4 284.5 Z M 280.4 313.2 L 249.1 305.2 L 284.4 270.0 L 321.7 281.5 L 280.4 313.2 Z M 314.7 239.9 L 249.1 305.2 L 224.6 297.7 L 290.2 232.3 L 314.7 239.9 Z M 357.7 251.9 L 351.8 255.4 L 357.7 251.9 Z M 336.5 253.8 L 342.3 265.4 L 321.7 281.5 L 284.4 270.0 L 314.7 239.9 L 336.5 253.8 Z M 304.2 167.3 L 275.5 195.7 L 231.9 182.9 L 266.4 148.9 L 304.2 167.3 Z M 327.1 140.1 L 304.2 167.3 L 266.4 148.9 L 282.0 136.0 L 277.4 131.7 L 327.1 140.1 Z M 348.9 114.7 L 353.1 120.7 L 330.6 141.2 L 277.4 131.7 L 311.4 104.1 L 348.9 114.7 Z M 343.5 179.3 L 315.1 207.6 L 275.5 195.7 L 304.2 167.3 L 343.5 179.3 Z M 368.7 108.6 L 372.8 149.6 L 343.5 179.3 L 304.2 167.3 L 370.5 99.2 L 368.7 108.6 Z M 346.3 219.5 L 369.1 221.9 L 336.4 246.9 L 290.2 232.3 L 318.6 204.1 L 346.3 219.5 Z M 373.7 145.4 L 371.8 172.5 L 392.0 195.9 L 388.9 212.9 L 355.4 222.3 L 318.6 204.1 L 373.7 145.4 Z M 440.1 205.3 L 450.0 216.0 L 410.7 247.2 L 365.5 243.3 L 385.1 223.8 L 403.1 224.5 L 394.6 218.3 L 405.5 193.5 L 440.1 205.3 Z M 383.0 67.8 L 348.9 114.7 L 311.4 104.1 L 326.9 77.6 L 323.7 59.4 L 383.0 67.8 Z M 393.2 14.4 L 408.3 28.7 L 400.1 39.9 L 408.7 41.7 L 389.2 65.9 L 323.7 59.4 L 343.1 50.0 L 379.3 6.1 L 393.2 14.4 Z M 415.4 36.2 L 417.7 45.1 L 348.9 114.7 L 367.1 83.6 L 399.4 56.7 L 408.7 41.4 L 400.2 36.5 L 408.3 28.7 L 415.4 36.2 Z M 315.1 207.6 L 224.6 297.7 L 192.3 287.7 L 281.1 197.3 L 315.1 207.6 Z`;
   const brooklynOutline  = `M 380.2 397.5 L 318.2 424.4 L 315.7 413.1 L 268.0 403.9 L 265.3 382.1 L 299.9 367.6 L 380.2 397.5 Z M 281.2 407.9 L 315.7 413.1 L 322.8 424.1 L 298.9 436.5 L 314.6 436.5 L 311.3 460.2 L 238.8 455.8 L 236.4 444.2 L 266.1 405.9 L 281.2 407.9 Z M 311.3 460.2 L 342.9 473.4 L 263.3 480.8 L 242.2 456.5 L 311.3 460.2 Z M 410.9 436.4 L 423.5 446.3 L 403.2 459.7 L 342.9 473.4 L 311.3 460.2 L 314.6 436.5 L 298.9 436.5 L 380.2 397.5 L 409.2 421.3 L 375.8 445.0 L 386.9 451.3 L 381.3 440.5 L 395.0 428.1 L 410.7 426.5 L 410.9 436.4 Z M 151.0 503.9 L 115.3 496.4 L 140.7 466.7 L 156.6 473.5 L 156.2 496.0 L 164.0 497.2 L 151.0 503.9 Z M 201.6 458.9 L 201.2 493.4 L 184.6 503.2 L 205.3 517.1 L 199.5 523.8 L 145.0 512.8 L 164.0 497.2 L 141.8 463.6 L 201.6 458.9 Z M 263.3 480.8 L 238.4 486.2 L 241.1 525.1 L 184.6 503.2 L 201.2 493.4 L 195.9 480.2 L 263.3 480.8 Z M 269.0 529.4 L 241.1 525.1 L 238.4 486.2 L 270.1 480.0 L 278.5 522.3 L 269.0 529.4 Z M 227.2 450.3 L 263.3 480.8 L 195.9 480.2 L 202.4 458.6 L 213.4 462.3 L 214.3 476.6 L 233.1 475.4 L 225.3 467.8 L 238.0 473.9 L 218.3 458.6 L 231.9 459.2 L 227.2 450.3 Z M 334.5 535.5 L 269.0 529.4 L 278.5 522.3 L 270.1 480.0 L 333.5 474.2 L 349.0 531.0 L 334.5 535.5 Z M 396.7 495.4 L 433.8 510.7 L 440.4 534.6 L 334.5 535.5 L 349.0 531.0 L 333.5 474.2 L 396.7 495.4 Z M 459.0 471.3 L 396.7 495.4 L 342.9 473.4 L 419.2 449.4 L 459.0 471.3 Z M 497.2 498.6 L 482.2 511.8 L 487.1 532.8 L 396.7 495.4 L 459.0 471.3 L 497.2 498.6 Z M 151.0 503.9 L 145.0 512.8 L 199.5 523.8 L 149.4 570.7 L 127.4 553.0 L 95.7 569.3 L 103.8 556.3 L 78.0 571.9 L 53.8 569.8 L 48.3 553.8 L 59.1 572.3 L 82.5 560.9 L 62.2 555.4 L 72.5 549.1 L 59.8 550.3 L 64.9 545.4 L 50.3 552.1 L 48.5 531.6 L 73.1 520.6 L 72.3 529.5 L 115.7 496.0 L 151.0 503.9 Z M 221.8 522.2 L 212.5 536.0 L 240.7 549.1 L 199.3 582.5 L 153.4 567.3 L 205.3 517.1 L 221.8 522.2 Z M 197.4 582.8 L 219.4 591.0 L 230.8 618.4 L 196.9 621.1 L 191.2 599.1 L 149.4 570.7 L 197.4 582.8 Z M 149.4 570.7 L 170.4 584.9 L 140.3 586.9 L 60.4 642.7 L 41.6 646.0 L 41.5 637.1 L 27.7 646.4 L -2.0 630.7 L 22.7 623.9 L 10.0 616.9 L 29.2 620.8 L 22.7 610.8 L 34.9 610.4 L 25.3 606.1 L 41.0 611.3 L 31.3 605.2 L 53.9 602.4 L 46.5 595.7 L 58.5 598.8 L 49.2 593.2 L 64.6 594.4 L 55.4 587.5 L 62.7 583.9 L 108.6 579.8 L 94.8 572.4 L 118.7 577.6 L 110.8 568.1 L 127.4 553.0 L 149.4 570.7 Z M 271.4 549.7 L 240.1 550.3 L 212.5 536.0 L 221.8 522.2 L 269.0 529.4 L 262.0 543.0 L 271.4 549.7 Z M 334.5 535.5 L 419.5 538.9 L 415.9 566.3 L 269.0 554.6 L 273.8 544.9 L 262.0 543.0 L 269.0 529.4 L 334.5 535.5 Z M 410.2 568.1 L 393.2 573.5 L 394.6 562.0 L 410.2 568.1 Z M 269.0 554.6 L 394.6 562.0 L 385.7 575.9 L 270.5 576.9 L 269.0 554.6 Z M 487.1 532.8 L 502.3 539.2 L 415.9 566.3 L 420.1 533.8 L 440.4 534.6 L 433.8 510.7 L 487.1 532.8 Z M 499.2 571.2 L 507.1 593.1 L 469.9 607.8 L 409.7 568.3 L 489.3 543.1 L 499.2 571.2 Z M 469.9 607.8 L 426.6 628.2 L 422.9 603.6 L 385.7 575.9 L 429.8 574.3 L 469.9 607.8 Z M 251.0 551.2 L 264.3 553.8 L 267.0 600.1 L 230.8 618.4 L 219.4 591.0 L 197.1 583.1 L 234.5 551.0 L 251.0 551.2 Z`;
@@ -90,6 +213,7 @@ function NycMap({
     <>
     <svg
       viewBox="18 70 384 480"
+      preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "100%", display: "block" }}
       onClick={onBackgroundClick}
     >
@@ -108,6 +232,21 @@ function NycMap({
           <feGaussianBlur stdDeviation="2.5" result="b" />
           <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
         </filter>
+        <filter id="mapElevation" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="4" stdDeviation="12"
+            floodColor="rgba(143, 31, 23, 0.2)" floodOpacity="1" result="shadow"/>
+          <feDropShadow dx="0" dy="2" stdDeviation="4"
+            floodColor="rgba(217, 160, 144, 0.3)" floodOpacity="1"/>
+        </filter>
+        <filter id="outerGlow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="8" result="blur"/>
+          <feColorMatrix type="matrix"
+            values="1 0 0 0 0.56  0 0 0 0 0.12  0 0 0 0 0.09  0 0 0 0 0.6" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
         <linearGradient id="waterGrad" x1="0" y1="0" x2="0.5" y2="1">
           <stop offset="0%" stopColor="rgb(180,130,60)" stopOpacity={0.15} />
           <stop offset="100%" stopColor="rgb(160,110,50)" stopOpacity={0.2} />
@@ -118,32 +257,58 @@ function NycMap({
         </linearGradient>
       </defs>
 
-      <rect width="402" height="550" fill="url(#waterGrad)" />
-      <path d={queensOutline} fill="rgba(210,160,80,0.25)" stroke="rgba(180,130,60,0.2)" strokeWidth={0.5} />
-      <path d={brooklynOutline} fill="url(#landGrad)" stroke="rgba(180,130,60,0.3)" strokeWidth={0.6} />
-      <path d={brooklynOutline} fill="none" stroke="rgba(200,150,70,0.3)" strokeWidth={3} filter="url(#fShore)" />
-      <path d={manhattanOutline} fill="url(#landGrad)" />
-      <path d={manhattanOutline} fill="none" stroke="rgba(200,150,70,0.2)" strokeWidth={5} filter="url(#fShore)" />
-      <path d={manhattanOutline} fill="none" stroke="rgba(180,130,60,0.5)" strokeWidth={0.85} />
+      <style>{`
+        @keyframes nycGlow {
+          0%, 100% { stroke-opacity: 0.28; filter: blur(3px); }
+          50% { stroke-opacity: 0.62; filter: blur(7px); }
+        }
+        .nyc-outer-glow {
+          animation: nycGlow 3s ease-in-out infinite;
+          fill: none;
+          pointer-events: none;
+        }
+        .nyc-outer-glow-deep {
+          animation: nycGlow 4s ease-in-out infinite reverse;
+          fill: none;
+          pointer-events: none;
+          filter: blur(6px);
+        }
+        .city-block { animation: none; }
+      `}</style>
+
+      <rect width="402" height="550" fill="none" />
+
+      {/* ── NYC outer boundary glow (behind all elements) ── */}
+      <path d={manhattanOutline} className="nyc-outer-glow-deep" stroke="rgba(140,110,180,0.34)" strokeWidth={14} />
+      <path d={brooklynOutline} className="nyc-outer-glow-deep" stroke="rgba(140,110,180,0.34)" strokeWidth={14} />
+      <path d={manhattanOutline} className="nyc-outer-glow" stroke="rgba(240,183,93,0.4)" strokeWidth={6} />
+      <path d={brooklynOutline} className="nyc-outer-glow" stroke="rgba(240,183,93,0.4)" strokeWidth={6} />
+
+      <path d={queensOutline} fill="none" stroke="rgba(244,194,109,0.28)" strokeWidth={0.45} />
+      <path d={brooklynOutline} fill="none" stroke="rgba(244,194,109,0.34)" strokeWidth={0.55} />
+      <path d={brooklynOutline} fill="none" stroke="rgba(240,183,93,0.32)" strokeWidth={3} filter="url(#fShore)" />
+      <path d={manhattanOutline} fill="none" />
+      <path d={manhattanOutline} fill="none" stroke="rgba(240,183,93,0.3)" strokeWidth={5} filter="url(#fShore)" />
+      <path d={manhattanOutline} fill="none" stroke="rgba(244,194,109,0.52)" strokeWidth={0.75} />
 
       {HOODS.map(h => {
         const isActive = selectedSlug === h.slug;
-        const isLit    = litSlugs.includes(h.slug);
         const isHov    = hovered === h.slug;
-        const fill   = isActive ? "rgba(13,35,124,0.2)" : isLit ? "rgba(13,35,124,0.18)" : isHov ? "rgba(217,160,144,0.22)" : "rgba(217,160,144,0.1)";
-        const stroke = isActive ? "rgba(13,35,124,0.65)" : isLit ? "#0D237C" : isHov ? "rgba(143,31,23,0.45)" : "rgba(143,31,23,0.2)";
-        const sw     = isActive ? 1.8 : isLit ? 1.5 : isHov ? 1.2 : 0.8;
+        const stroke = isActive ? atlasActive : isHov ? atlasHover : atlasLine;
+        const sw     = isActive ? 2.2 : isHov ? 1.8 : 1.2;
+        const filter = (isActive || isHov) ? "url(#fGlow)" : undefined;
         return (
           <g key={h.slug}>
-            <path d={h.path} fill={fill} style={{ transition: "fill 0.25s", pointerEvents: "none" }} />
-            {isLit && (
-              <path d={h.path} fill="none"
-                stroke="rgba(240,180,80,0.4)"
-                strokeWidth={4} filter="url(#fGlow)" style={{ pointerEvents: "none" }} />
-            )}
-            {isActive && <path d={h.path} fill={`url(#hatch-${h.slug})`} style={{ pointerEvents: "none" }} />}
-            <path d={h.path} fill="none" stroke={stroke} strokeWidth={sw}
-              style={{ cursor: "pointer", transition: "stroke 0.25s, stroke-width 0.25s" }}
+            <path d={h.path} fill="none"
+              className={(!isActive && !isHov) ? "city-block" : undefined}
+              filter={filter}
+              style={{
+                stroke,
+                strokeWidth: sw,
+                animation: (isActive || isHov) ? "none" : undefined,
+                cursor: "pointer",
+                transition: "stroke 0.25s, stroke-width 0.25s",
+              }}
               onMouseEnter={e => { setHovered(h.slug); setHoverTip({ slug: h.slug, x: e.clientX, y: e.clientY }); }}
               onMouseMove={e => setHoverTip({ slug: h.slug, x: e.clientX, y: e.clientY })}
               onMouseLeave={() => { setHovered(null); setHoverTip(null); }}
@@ -159,44 +324,83 @@ function NycMap({
       })}
 
 
-      {/* Compass */}
-      <g transform="translate(390,108)">
-        <line x1={0} y1={-11} x2={0} y2={11} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <line x1={-11} y1={0} x2={11} y2={0} stroke="rgba(140,90,40,0.35)" strokeWidth={0.7} />
-        <circle cx={0} cy={0} r={2} fill="none" stroke="rgba(140,90,40,0.35)" strokeWidth={0.5} />
-        <text x={0} y={-14} textAnchor="middle" fill="rgba(140,90,40,0.4)" fontSize={5}
-          fontFamily="'DM Sans', sans-serif" letterSpacing="0.1">N</text>
-      </g>
+      {/* Compass hidden to match atlas visual language */}
     </svg>
-    {hoverTip && (() => {
-      const th = HOODS.find(n => n.slug === hoverTip.slug);
-      if (!th) return null;
-      const showLeft = hoverTip.x > window.innerWidth * 0.7;
-      const showAbove = hoverTip.y > window.innerHeight * 0.75;
-      return (
-        <div key={th.slug} style={{
-          position: "fixed",
-          left: hoverTip.x + (showLeft ? -12 : 12),
-          top: hoverTip.y + (showAbove ? -10 : 10),
-          transform: `translate(${showLeft ? "-100%" : "0"}, ${showAbove ? "-100%" : "0"})`,
-          background: "rgba(235,211,208,0.82)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          border: "0.5px solid rgba(180,140,130,0.2)",
-          borderRadius: "10px",
-          padding: "12px 16px",
-          minWidth: "150px",
-          pointerEvents: "none",
-          zIndex: 20,
-          animation: "tipFadeIn 0.2s ease",
-        }}>
-          <div style={{ fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: 4, fontFamily: "'DM Sans', sans-serif" }}>{th.borough}</div>
-          <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1rem", color: "#5a3535", marginBottom: 3 }}>{th.name}</div>
-          <div style={{ fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(107,64,64,0.4)", fontFamily: "'DM Sans', sans-serif" }}>{th.mood}</div>
-        </div>
-      );
-    })()}
+    {/* Hover tooltip hidden to match atlas visual language */}
     </>
+  );
+}
+
+function ManualPinPicker({
+  lat,
+  lng,
+  onChange,
+}: {
+  lat: number | null;
+  lng: number | null;
+  onChange: (lat: number, lng: number) => void;
+}) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const fallback = latLngToMap(40.758, -73.9855);
+  const pin = lat !== null && lng !== null ? latLngToMap(lat, lng) : fallback;
+
+  const setFromClientPoint = (clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const transformed = pt.matrixTransform(svg.getScreenCTM()?.inverse());
+    const x = clamp(transformed.x, MAP_VIEWBOX.minX, MAP_VIEWBOX.minX + MAP_VIEWBOX.width);
+    const y = clamp(transformed.y, MAP_VIEWBOX.minY, MAP_VIEWBOX.minY + MAP_VIEWBOX.height);
+    const next = mapToLatLng(x, y);
+    onChange(next.lat, next.lng);
+  };
+
+  return (
+    <svg
+      ref={svgRef}
+      viewBox={`${MAP_VIEWBOX.minX} ${MAP_VIEWBOX.minY} ${MAP_VIEWBOX.width} ${MAP_VIEWBOX.height}`}
+      style={{
+        width: "100%",
+        maxHeight: 220,
+        borderRadius: 8,
+        border: "0.5px solid rgba(155,48,255,0.25)",
+        background: "rgba(7,6,16,0.75)",
+        cursor: dragging ? "grabbing" : "crosshair",
+        userSelect: "none",
+      }}
+      onMouseDown={e => {
+        setDragging(true);
+        setFromClientPoint(e.clientX, e.clientY);
+      }}
+      onMouseMove={e => {
+        if (dragging) setFromClientPoint(e.clientX, e.clientY);
+      }}
+      onMouseUp={() => setDragging(false)}
+      onMouseLeave={() => setDragging(false)}
+    >
+      <rect
+        x={MAP_VIEWBOX.minX}
+        y={MAP_VIEWBOX.minY}
+        width={MAP_VIEWBOX.width}
+        height={MAP_VIEWBOX.height}
+        fill="rgba(12, 10, 28, 0.92)"
+      />
+      {HOODS.map(hood => (
+        <path
+          key={`picker-${hood.slug}`}
+          d={hood.path}
+          fill="none"
+          stroke="rgba(244,194,109,0.4)"
+          strokeWidth={1}
+          pointerEvents="none"
+        />
+      ))}
+      <circle cx={pin.x} cy={pin.y} r={8} fill="rgba(255,242,184,0.16)" stroke="rgba(255,242,184,0.98)" strokeWidth={1.5} />
+      <circle cx={pin.x} cy={pin.y} r={2.8} fill="rgba(255,242,184,0.98)" />
+    </svg>
   );
 }
 
@@ -216,12 +420,12 @@ export default function TryPage() {
   const [showUpload, setShowUpload]         = useState(false);
 
   // Upload session state (reset per open)
-  const [currentPhotos, setCurrentPhotos]   = useState<string[]>([]);
-  const [currentNotes, setCurrentNotes]     = useState<string[]>([]);
+  const [currentItems, setCurrentItems]     = useState<PhotoMemory[]>([]);
   const [dragOver, setDragOver]             = useState(false);
   const [uploading, setUploading]           = useState(false);
   const [finishing, setFinishing]           = useState(false);
   const [uploadError, setUploadError]       = useState<string | null>(null);
+  const [pinPickerIndex, setPinPickerIndex] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -229,7 +433,10 @@ export default function TryPage() {
   useEffect(() => {
     try {
       const slim = Object.fromEntries(
-        Object.entries(memories).map(([slug, data]) => [slug, { photoUrls: [], notes: data.notes }])
+        Object.entries(memories).map(([slug, data]) => [slug, {
+          photoUrls: [],
+          notes: data.photos.map(photo => photo.note),
+        }])
       );
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(slim));
     } catch {
@@ -261,15 +468,68 @@ export default function TryPage() {
     return data.publicUrl;
   };
 
+  const parseExifMetadata = async (file: File): Promise<{
+    capturedAt: string | null;
+    lat: number | null;
+    lng: number | null;
+    locationSource: PhotoLocationSource;
+  }> => {
+    try {
+      const parsed = await exifr.parse(file, {
+        exif: true,
+        gps: true,
+        tiff: true,
+        ifd0: true,
+      }) as Record<string, unknown> | null;
+
+      const lat = typeof parsed?.latitude === "number" ? parsed.latitude : null;
+      const lng = typeof parsed?.longitude === "number" ? parsed.longitude : null;
+
+      const maybeDate = parsed?.DateTimeOriginal ?? parsed?.CreateDate ?? parsed?.ModifyDate;
+      let capturedAt: string | null = null;
+      if (maybeDate instanceof Date && !Number.isNaN(maybeDate.getTime())) {
+        capturedAt = maybeDate.toISOString();
+      } else if (typeof maybeDate === "string" || typeof maybeDate === "number") {
+        const parsedDate = new Date(maybeDate);
+        if (!Number.isNaN(parsedDate.getTime())) capturedAt = parsedDate.toISOString();
+      }
+
+      return {
+        capturedAt,
+        lat,
+        lng,
+        locationSource: lat !== null || lng !== null || capturedAt ? "exif" : "none",
+      };
+    } catch {
+      return { capturedAt: null, lat: null, lng: null, locationSource: "none" };
+    }
+  };
+
+  const uploadFilesForSlug = async (files: File[], slug: string): Promise<PhotoMemory[]> =>
+    Promise.all(
+      files.map(async (file) => {
+        const [url, exifData] = await Promise.all([uploadFile(file, slug), parseExifMetadata(file)]);
+        return {
+          url,
+          note: "",
+          capturedAt: exifData.capturedAt,
+          lat: exifData.lat,
+          lng: exifData.lng,
+          locationSource: exifData.locationSource,
+          manualOverride: false,
+          manualPlaceName: "",
+        };
+      }),
+    );
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length || !selectedSlug) return;
     setUploading(true);
     setUploadError(null);
     try {
-      const urls = await Promise.all(files.map(f => uploadFile(f, selectedSlug)));
-      setCurrentPhotos(prev => [...prev, ...urls]);
-      setCurrentNotes(prev => [...prev, ...files.map(() => "")]);
+      const uploaded = await uploadFilesForSlug(files, selectedSlug);
+      setCurrentItems(prev => [...prev, ...uploaded]);
     } catch {
       setUploadError("Upload failed — check your connection and try again.");
     } finally {
@@ -286,9 +546,8 @@ export default function TryPage() {
     setUploading(true);
     setUploadError(null);
     try {
-      const urls = await Promise.all(files.map(f => uploadFile(f, selectedSlug)));
-      setCurrentPhotos(prev => [...prev, ...urls]);
-      setCurrentNotes(prev => [...prev, ...files.map(() => "")]);
+      const uploaded = await uploadFilesForSlug(files, selectedSlug);
+      setCurrentItems(prev => [...prev, ...uploaded]);
     } catch {
       setUploadError("Upload failed — check your connection and try again.");
     } finally {
@@ -297,12 +556,58 @@ export default function TryPage() {
   };
 
   const removePhoto = (i: number) => {
-    setCurrentPhotos(prev => prev.filter((_, idx) => idx !== i));
-    setCurrentNotes(prev => prev.filter((_, idx) => idx !== i));
+    setCurrentItems(prev => prev.filter((_, idx) => idx !== i));
+    setPinPickerIndex(null);
+  };
+
+  const updateItem = (i: number, updater: (photo: PhotoMemory) => PhotoMemory) => {
+    setCurrentItems(prev => prev.map((photo, idx) => (idx === i ? updater(photo) : photo)));
   };
 
   const updateNote = (i: number, val: string) => {
-    setCurrentNotes(prev => { const n = [...prev]; n[i] = val; return n; });
+    updateItem(i, photo => ({ ...photo, note: val }));
+  };
+
+  const updateCapturedAt = (i: number, localTime: string) => {
+    updateItem(i, photo => ({
+      ...photo,
+      capturedAt: localInputToIso(localTime),
+      manualOverride: true,
+      locationSource: "manual",
+    }));
+  };
+
+  const updateManualPlaceName = (i: number, manualPlaceName: string) => {
+    updateItem(i, photo => ({
+      ...photo,
+      manualPlaceName,
+      manualOverride: true,
+      locationSource: "manual",
+    }));
+  };
+
+  const updateCoordinate = (i: number, key: "lat" | "lng", value: string) => {
+    const nextValue = value.trim() === "" ? null : Number(value);
+    updateItem(i, photo => ({
+      ...photo,
+      [key]: nextValue !== null && Number.isFinite(nextValue) ? nextValue : null,
+      manualOverride: true,
+      locationSource: "manual",
+    }));
+  };
+
+  const applyNeighborhoodPreset = (i: number, slug: Slug) => {
+    const center = HOOD_CENTER_COORDS[slug];
+    const hood = HOODS.find(h => h.slug === slug);
+    if (!center || !hood) return;
+    updateItem(i, photo => ({
+      ...photo,
+      lat: center.lat,
+      lng: center.lng,
+      manualPlaceName: hood.name,
+      manualOverride: true,
+      locationSource: "manual",
+    }));
   };
 
   const handleSaveAndAddAnother = () => {
@@ -310,16 +615,15 @@ export default function TryPage() {
     const updated: MemoryStore = {
       ...memories,
       [selectedSlug]: {
-        photoUrls: [...(memories[selectedSlug]?.photoUrls ?? []), ...currentPhotos],
-        notes:     [...(memories[selectedSlug]?.notes     ?? []), ...currentNotes],
+        photos: [...(memories[selectedSlug]?.photos ?? []), ...currentItems],
       },
     };
     setMemories(updated);
-    setCurrentPhotos([]);
-    setCurrentNotes([]);
+    setCurrentItems([]);
     setShowUpload(false);
     setShowPanel(false);
     setSelectedSlug(null);
+    setPinPickerIndex(null);
   };
 
   const handleFinish = async () => {
@@ -330,8 +634,8 @@ export default function TryPage() {
       // Build neighborhood_data: { [slug]: { notes, photoUrls } }
       const neighborhoodData = Object.fromEntries(
         Object.entries(memories).map(([slug, data]) => [slug, {
-          notes: data.notes,
-          photoUrls: data.photoUrls,
+          notes: data.photos.map(photo => photo.note),
+          photoUrls: data.photos.map(photo => photo.url),
         }])
       );
 
@@ -343,10 +647,16 @@ export default function TryPage() {
 
       // Insert one row per photo into the photos table
       const photoRows = Object.entries(memories).flatMap(([slug, data]) =>
-        data.photoUrls.map(url => ({
+        data.photos.map(photo => ({
           atlas_id: atlasId,
           neighborhood_slug: slug,
-          storage_url: url,
+          storage_url: photo.url,
+          captured_at: photo.capturedAt,
+          lat: photo.lat,
+          lng: photo.lng,
+          location_source: photo.locationSource,
+          manual_override: photo.manualOverride,
+          manual_place_name: photo.manualPlaceName || null,
         }))
       );
       if (photoRows.length > 0) {
@@ -365,10 +675,10 @@ export default function TryPage() {
   // Open upload overlay for a neighborhood (new or existing)
   const reopenUpload = (slug: string) => {
     setSelectedSlug(slug);
-    setCurrentPhotos(memories[slug]?.photoUrls ?? []);
-    setCurrentNotes(memories[slug]?.notes ?? []);
+    setCurrentItems(memories[slug]?.photos ?? []);
     setShowPanel(true);
     setShowUpload(true);
+    setPinPickerIndex(null);
   };
 
   // Map block click
@@ -379,10 +689,10 @@ export default function TryPage() {
     } else {
       // Unlit block → show panel first
       setSelectedSlug(slug);
-      setCurrentPhotos([]);
-      setCurrentNotes([]);
+      setCurrentItems([]);
       setShowPanel(true);
       setShowUpload(false);
+      setPinPickerIndex(null);
     }
   };
 
@@ -394,47 +704,90 @@ export default function TryPage() {
   };
 
   const litSlugs = Object.keys(memories);
+  const selectableSlugs = HOODS.map((h) => h.slug);
   const mappedCount = litSlugs.length;
+  const mapPhotoPoints: MapPhotoPoint[] = Object.entries(memories).flatMap(([slug, data]) =>
+    data.photos.map((photo, i) => ({
+      id: `try-${slug}-${i}`,
+      neighborhoodSlug: slug,
+      url: photo.url,
+      lat: photo.lat,
+      lng: photo.lng,
+    })),
+  );
+  const representativePhotos: RepresentativePhoto[] = Object.entries(memories)
+    .map(([slug, data]) => {
+      const center = HOOD_CENTER_COORDS[slug as Slug];
+      const first = data.photos[0];
+      if (!center || !first?.url) return null;
+      return { hoodId: slug, url: first.url, lat: center.lat, lng: center.lng };
+    })
+    .filter((x): x is RepresentativePhoto => Boolean(x));
 
   // ── Render ──
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", position: "relative" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;1,400&family=DM+Sans:wght@300;400&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Playfair+Display:ital,wght@0,400;1,400&family=DM+Sans:wght@300;400&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; overflow: hidden; }
+        body, #root { background: transparent !important; }
+        svg { background: transparent !important; }
+        .mapboxgl-map, .mapboxgl-canvas, .mapboxgl-canvas-container { background: transparent !important; }
+        .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl { margin: 0 14px 14px 0; }
+        .mapboxgl-ctrl-group {
+          background: rgba(22, 15, 46, 0.42) !important;
+          border: 1px solid rgba(232, 212, 164, 0.45) !important;
+          box-shadow: 0 8px 20px rgba(12, 6, 28, 0.35) !important;
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          border-radius: 10px !important;
+          overflow: hidden;
+        }
+        .mapboxgl-ctrl-group button { width: 34px !important; height: 34px !important; background: transparent !important; }
+        .mapboxgl-ctrl-group button + button { border-top: 1px solid rgba(232, 212, 164, 0.25) !important; }
+        .mapboxgl-ctrl-group .mapboxgl-ctrl-icon {
+          filter: invert(95%) sepia(18%) saturate(382%) hue-rotate(355deg) brightness(101%) contrast(92%);
+          opacity: 0.95;
+        }
         @keyframes tipFadeIn { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
 
       {/* 1. Shader background */}
       <ShaderBackground />
 
-      {/* 2. SVG map — always rendered, never unmounts */}
-      <div style={{ position: "absolute", inset: 0, top: NAV_H, zIndex: 1 }}>
-        <NycMap
-          selectedSlug={showPanel || showUpload ? selectedSlug : null}
-          litSlugs={litSlugs}
+      {/* 2. Shared Mapbox map */}
+      <div style={{ position: "absolute", inset: 0, top: NAV_H, zIndex: 1, background: "transparent" }}>
+        <AtlasStyledMap
+          activeId={showPanel || showUpload ? selectedSlug : null}
+          litIds={litSlugs}
+          selectableIds={selectableSlugs as string[]}
           onSelect={handleBlockClick}
           onBackgroundClick={handleMapBackgroundClick}
+          photoPoints={mapPhotoPoints}
+          representativePhotos={representativePhotos}
+          lockOverviewMinZoom
+          markerStartOffset={0.35}
+          detailPinZoom={13.2}
         />
       </div>
 
       {/* 3. Navbar */}
       <nav style={{
         position: "fixed", top: 0, left: 0, right: 0, height: NAV_H,
-        background: "rgba(235,211,208,0.75)", backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
+        background: "transparent", backdropFilter: "none",
+        WebkitBackdropFilter: "none",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 2rem", zIndex: 100,
-        borderBottom: "0.5px solid rgba(180,140,130,0.15)",
+        border: "none",
       }}>
         <button
           onClick={() => navigate("/")}
           style={{
-            fontFamily: "'Playfair Display', Georgia, serif", fontStyle: "italic",
-            fontSize: "1.1rem", color: "#6b4040", textDecoration: "none",
+            fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic",
+            fontSize: "1.1rem", color: "#ffffff", textDecoration: "none",
             background: "none", border: "none", cursor: "pointer", padding: 0,
-            letterSpacing: "-0.02em",
+            letterSpacing: "-0.01em", fontWeight: 400,
           }}
         >CityMood</button>
 
@@ -442,7 +795,7 @@ export default function TryPage() {
           {mappedCount > 0 && (
             <>
               <span style={{
-                fontSize: "0.65rem", color: "rgba(107,64,64,0.6)",
+                fontSize: "0.65rem", color: "rgba(196,174,244,0.5)",
                 textTransform: "uppercase", letterSpacing: "0.08em",
                 fontFamily: "'DM Sans', sans-serif",
               }}>
@@ -452,15 +805,15 @@ export default function TryPage() {
                 onClick={handleFinish}
                 disabled={finishing}
                 style={{
-                  fontSize: "0.65rem", color: finishing ? "rgba(107,64,64,0.35)" : "rgba(107,64,64,0.6)",
-                  border: "0.5px solid rgba(107,64,64,0.2)", borderRadius: 100,
-                  padding: "5px 14px", background: "transparent",
+                  fontSize: "0.72rem", color: finishing ? "rgba(255,255,255,0.3)" : "#ffffff",
+                  border: "1.5px solid rgba(255,255,255,0.7)", borderRadius: 100,
+                  padding: "6px 18px", background: "transparent",
                   cursor: finishing ? "default" : "pointer",
                   letterSpacing: "0.08em", textTransform: "uppercase",
-                  fontFamily: "'DM Sans', sans-serif", transition: "color 0.2s",
+                  fontFamily: "'DM Sans', sans-serif", transition: "all 0.2s ease",
                 }}
-                onMouseEnter={e => { if (!finishing) e.currentTarget.style.color = "rgba(107,64,64,1)"; }}
-                onMouseLeave={e => { if (!finishing) e.currentTarget.style.color = "rgba(107,64,64,0.6)"; }}
+                onMouseEnter={e => { if (!finishing) e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
+                onMouseLeave={e => { if (!finishing) e.currentTarget.style.background = "transparent"; }}
               >{finishing ? "Saving…" : "View my atlas →"}</button>
             </>
           )}
@@ -473,17 +826,17 @@ export default function TryPage() {
         zIndex: 10, pointerEvents: "none",
       }}>
         <div style={{
-          fontSize: "0.55rem", letterSpacing: "0.12em",
-          textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: 8,
+          fontSize: "0.7rem", letterSpacing: "0.15em",
+          textTransform: "uppercase", color: "rgba(196,174,244,0.4)", marginBottom: 8,
           fontFamily: "'DM Sans', sans-serif",
         }}>Build your map</div>
         <div style={{
-          fontFamily: "'Playfair Display', Georgia, serif",
-          fontSize: "1.6rem", color: "#5a3535", lineHeight: 1.1, marginBottom: 6,
+          fontFamily: "'Cormorant Garamond', serif",
+          fontSize: "4rem", fontWeight: 300, color: "#EDE8F8", lineHeight: 1.1, marginBottom: 6,
         }}>Your New York City</div>
         <div style={{
-          fontStyle: "italic", fontSize: "0.72rem", color: "rgba(107,64,64,0.5)",
-          fontFamily: "'Playfair Display', Georgia, serif",
+          fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic",
+          fontSize: "1.1rem", color: "rgba(196,174,244,0.4)",
         }}>Select a neighborhood to add your memory</div>
       </div>
 
@@ -492,7 +845,7 @@ export default function TryPage() {
         <div style={{ position: "absolute", bottom: "2rem", left: "2rem", zIndex: 10 }}>
           <div style={{
             fontSize: "0.55rem", letterSpacing: "0.1em",
-            textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: 8,
+            textTransform: "uppercase", color: "rgba(196,174,244,0.4)", marginBottom: 8,
             fontFamily: "'DM Sans', sans-serif",
           }}>Mapped so far</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -501,17 +854,17 @@ export default function TryPage() {
                 key={slug}
                 onClick={() => reopenUpload(slug)}
                 style={{
-                  background: "rgba(221,147,137,0.18)",
-                  border: "0.5px solid rgba(221,147,137,0.35)",
+                  background: "rgba(155,48,255,0.12)",
+                  border: "0.5px solid rgba(155,48,255,0.25)",
                   borderRadius: 100, padding: "5px 14px", cursor: "pointer",
-                  fontSize: "0.75rem", color: "#5a3535",
+                  fontSize: "0.75rem", color: "#EDE8F8",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   transition: "background 0.18s", whiteSpace: "nowrap",
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "rgba(221,147,137,0.28)")}
-                onMouseLeave={e => (e.currentTarget.style.background = "rgba(221,147,137,0.18)")}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(155,48,255,0.22)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "rgba(155,48,255,0.12)")}
               >
-                {getNeighborhoodName(slug)} · {data.photoUrls.length} photo{data.photoUrls.length !== 1 ? "s" : ""}
+                {getNeighborhoodName(slug)} · {data.photos.length} photo{data.photos.length !== 1 ? "s" : ""}
               </div>
             ))}
           </div>
@@ -524,7 +877,7 @@ export default function TryPage() {
           <div
             onClick={finishing ? undefined : handleFinish}
             style={{
-              fontSize: "0.72rem", color: finishing ? "rgba(221,147,137,0.4)" : "#DD9389",
+              fontSize: "0.72rem", color: finishing ? "rgba(196,174,244,0.3)" : "#FFD700",
               cursor: finishing ? "default" : "pointer", marginTop: 12,
               fontFamily: "'DM Sans', sans-serif",
               transition: "opacity 0.18s",
@@ -542,37 +895,37 @@ export default function TryPage() {
         onClick={e => e.stopPropagation()}
         style={{
           position: "fixed", top: NAV_H, left: 0, bottom: 0, width: 280,
-          background: "rgba(235,211,208,0.88)", backdropFilter: "blur(16px)",
+          background: "rgba(10,8,20,0.92)", backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
-          borderRight: "0.5px solid rgba(180,140,130,0.15)",
+          borderRight: "0.5px solid rgba(155,48,255,0.12)",
           zIndex: 50, padding: "28px 24px",
           display: "flex", flexDirection: "column", gap: 20,
           transform: showPanel ? "translateX(0)" : "translateX(-100%)",
           transition: "transform 0.35s ease",
         }}
       >
-        <div style={{ width: 28, height: 2, background: "#DD9389", flexShrink: 0 }} />
+        <div style={{ width: 28, height: 2, background: "#9B30FF", flexShrink: 0 }} />
 
         <div>
           <div style={{
             fontSize: "0.55rem", letterSpacing: "0.1em",
-            textTransform: "uppercase", color: "rgba(107,64,64,0.4)", marginBottom: 4,
+            textTransform: "uppercase", color: "rgba(155,48,255,0.4)", marginBottom: 4,
             fontFamily: "'DM Sans', sans-serif",
           }}>{getBorough(selectedSlug)}</div>
           <div style={{
             fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "1.5rem", color: "#5a3535", lineHeight: 1.1, marginBottom: 4,
+            fontSize: "1.5rem", color: "#EDE8F8", lineHeight: 1.1, marginBottom: 4,
           }}>{getNeighborhoodName(selectedSlug)}</div>
           <div style={{
             fontSize: "0.6rem", letterSpacing: "0.08em",
-            textTransform: "uppercase", color: "rgba(107,64,64,0.4)",
+            textTransform: "uppercase", color: "rgba(196,174,244,0.4)",
             fontFamily: "'DM Sans', sans-serif",
           }}>{getMoodTag(selectedSlug)}</div>
         </div>
 
         <div style={{
           fontFamily: "'Playfair Display', Georgia, serif", fontStyle: "italic",
-          fontSize: "0.9rem", color: "rgba(107,64,64,0.6)", lineHeight: 1.6,
+          fontSize: "0.9rem", color: "rgba(196,174,244,0.5)", lineHeight: 1.6,
         }}>
           "What did {getNeighborhoodName(selectedSlug)} feel like to you?"
         </div>
@@ -581,25 +934,24 @@ export default function TryPage() {
 
         <button
           onClick={() => {
-            setCurrentPhotos(memories[selectedSlug ?? ""]?.photoUrls ?? []);
-            setCurrentNotes(memories[selectedSlug ?? ""]?.notes ?? []);
+            setCurrentItems(memories[selectedSlug ?? ""]?.photos ?? []);
             setShowUpload(true);
           }}
           style={{
             width: "100%", height: 48,
-            background: "rgba(221,147,137,0.85)", color: "#fff8f5",
+            background: "rgba(155,48,255,0.85)", color: "#EDE8F8",
             border: "none", borderRadius: 100, fontSize: "0.8rem",
             letterSpacing: "0.04em", cursor: "pointer",
             fontFamily: "'DM Sans', sans-serif", transition: "background 0.2s",
             flexShrink: 0,
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = "rgba(221,147,137,1)")}
-          onMouseLeave={e => (e.currentTarget.style.background = "rgba(221,147,137,0.85)")}
+          onMouseEnter={e => (e.currentTarget.style.background = "rgba(155,48,255,1)")}
+          onMouseLeave={e => (e.currentTarget.style.background = "rgba(155,48,255,0.85)")}
         >Add a memory →</button>
 
         <div style={{
           fontSize: "0.55rem", textAlign: "center",
-          color: "rgba(107,64,64,0.3)", letterSpacing: "0.08em",
+          color: "rgba(196,174,244,0.3)", letterSpacing: "0.08em",
           textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif",
         }}>ESC to close</div>
       </div>
@@ -607,7 +959,7 @@ export default function TryPage() {
       {/* 7. Upload overlay — always in DOM, CSS controlled */}
       <div style={{
         position: "fixed", inset: 0, zIndex: 60,
-        background: "rgba(245,237,232,0.92)", backdropFilter: "blur(24px)",
+        background: "rgba(10,8,20,0.93)", backdropFilter: "blur(24px)",
         WebkitBackdropFilter: "blur(24px)",
         opacity: showUpload ? 1 : 0,
         pointerEvents: showUpload ? "all" : "none",
@@ -628,21 +980,21 @@ export default function TryPage() {
               onClick={() => setShowUpload(false)}
               style={{
                 background: "none", border: "none", cursor: "pointer",
-                color: "rgba(107,64,64,0.6)", fontSize: "0.75rem",
+                color: "rgba(196,174,244,0.6)", fontSize: "0.75rem",
                 fontFamily: "'DM Sans', sans-serif", transition: "color 0.2s",
                 letterSpacing: "0.04em",
               }}
-              onMouseEnter={e => (e.currentTarget.style.color = "rgba(107,64,64,1)")}
-              onMouseLeave={e => (e.currentTarget.style.color = "rgba(107,64,64,0.6)")}
+              onMouseEnter={e => (e.currentTarget.style.color = "rgba(196,174,244,1)")}
+              onMouseLeave={e => (e.currentTarget.style.color = "rgba(196,174,244,0.6)")}
             >← Back</button>
             <span style={{
               fontFamily: "'Playfair Display', Georgia, serif", fontStyle: "italic",
-              fontSize: "1rem", color: "#5a3535",
+              fontSize: "1rem", color: "#EDE8F8",
             }}>{getNeighborhoodName(selectedSlug)}</span>
             <span style={{
-              fontSize: "0.7rem", color: "rgba(107,64,64,0.5)",
+              fontSize: "0.7rem", color: "rgba(196,174,244,0.5)",
               fontFamily: "'DM Sans', sans-serif",
-            }}>{currentPhotos.length} photo{currentPhotos.length !== 1 ? "s" : ""} added</span>
+            }}>{currentItems.length} photo{currentItems.length !== 1 ? "s" : ""} added</span>
           </div>
 
           {/* Upload zone */}
@@ -652,23 +1004,23 @@ export default function TryPage() {
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
             style={{
-              border: `1.5px dashed ${dragOver ? "rgba(221,147,137,0.6)" : "rgba(180,140,130,0.3)"}`,
+              border: `1.5px dashed ${dragOver ? "rgba(155,48,255,0.6)" : "rgba(155,48,255,0.25)"}`,
               borderRadius: 14, minHeight: 160,
               display: "flex", flexDirection: "column",
               alignItems: "center", justifyContent: "center",
               gap: 10, cursor: "pointer",
-              background: dragOver ? "rgba(221,147,137,0.05)" : "transparent",
+              background: dragOver ? "rgba(155,48,255,0.05)" : "transparent",
               transition: "border-color 0.2s ease, background 0.2s ease",
             }}
           >
             {uploading ? (
-              <div style={{ fontSize: "0.72rem", color: "rgba(107,64,64,0.5)", fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.06em" }}>
+              <div style={{ fontSize: "0.72rem", color: "rgba(196,174,244,0.5)", fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.06em" }}>
                 Uploading…
               </div>
             ) : (
               <>
-                <div style={{ fontSize: "1.8rem", color: "rgba(107,64,64,0.25)", lineHeight: 1 }}>+</div>
-                <div style={{ fontSize: "0.78rem", color: "rgba(107,64,64,0.35)", fontFamily: "'DM Sans', sans-serif" }}>
+                <div style={{ fontSize: "1.8rem", color: "rgba(155,48,255,0.4)", lineHeight: 1 }}>+</div>
+                <div style={{ fontSize: "0.78rem", color: "rgba(196,174,244,0.5)", fontFamily: "'DM Sans', sans-serif" }}>
                   Drop photos here, or click to choose
                 </div>
               </>
@@ -683,14 +1035,14 @@ export default function TryPage() {
           />
 
           {/* Photo grid */}
-          {currentPhotos.length > 0 && (
+          {currentItems.length > 0 && (
             <div style={{
               display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
               gap: 12, marginTop: 20,
             }}>
-              {currentPhotos.map((url, i) => (
+              {currentItems.map((photo, i) => (
                 <div key={i} style={{ position: "relative" }}>
-                  <img src={url} alt="" style={{
+                  <img src={photo.url} alt="" style={{
                     width: "100%", aspectRatio: "1", objectFit: "cover",
                     borderRadius: 8, display: "block",
                     border: "0.5px solid rgba(255,255,255,0.08)",
@@ -707,22 +1059,158 @@ export default function TryPage() {
                     }}
                   >×</button>
                   <textarea
-                    value={currentNotes[i] ?? ""}
+                    value={photo.note}
                     onChange={e => updateNote(i, e.target.value)}
                     placeholder="The story behind this photo..."
                     maxLength={100}
                     rows={2}
                     style={{
                       width: "100%", marginTop: 6,
-                      background: "rgba(107,64,64,0.04)",
-                      border: "0.5px solid rgba(107,64,64,0.1)",
+                      background: "rgba(155,48,255,0.05)",
+                      border: "0.5px solid rgba(155,48,255,0.15)",
                       borderRadius: 6, padding: "6px 8px",
-                      color: "rgba(107,64,64,0.75)",
+                      color: "rgba(196,174,244,0.75)",
                       fontSize: "0.72rem", resize: "none", outline: "none",
                       fontFamily: "Georgia, serif", fontStyle: "italic",
                       boxSizing: "border-box",
                     }}
                   />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6, marginTop: 6 }}>
+                    <select
+                      value=""
+                      onChange={e => {
+                        const slug = e.target.value as Slug;
+                        if (slug) applyNeighborhoodPreset(i, slug);
+                        e.currentTarget.value = "";
+                      }}
+                      style={{
+                        width: "100%",
+                        background: "rgba(155,48,255,0.05)",
+                        border: "0.5px solid rgba(155,48,255,0.15)",
+                        borderRadius: 6, padding: "6px 8px",
+                        color: "rgba(196,174,244,0.75)",
+                        fontSize: "0.7rem", outline: "none",
+                        fontFamily: "'DM Sans', sans-serif",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <option value="">Choose neighborhood preset…</option>
+                      {HOODS.map(hood => (
+                        <option key={`preset-${hood.slug}`} value={hood.slug}>
+                          {hood.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="datetime-local"
+                      value={isoToLocalInput(photo.capturedAt)}
+                      onChange={e => updateCapturedAt(i, e.target.value)}
+                      style={{
+                        width: "100%",
+                        background: "rgba(155,48,255,0.05)",
+                        border: "0.5px solid rgba(155,48,255,0.15)",
+                        borderRadius: 6, padding: "6px 8px",
+                        color: "rgba(196,174,244,0.75)",
+                        fontSize: "0.7rem", outline: "none",
+                        fontFamily: "'DM Sans', sans-serif",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={photo.manualPlaceName}
+                      onChange={e => updateManualPlaceName(i, e.target.value)}
+                      placeholder="Place name (optional)"
+                      maxLength={80}
+                      style={{
+                        width: "100%",
+                        background: "rgba(155,48,255,0.05)",
+                        border: "0.5px solid rgba(155,48,255,0.15)",
+                        borderRadius: 6, padding: "6px 8px",
+                        color: "rgba(196,174,244,0.75)",
+                        fontSize: "0.7rem", outline: "none",
+                        fontFamily: "'DM Sans', sans-serif",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <input
+                        type="number"
+                        step="any"
+                        value={photo.lat ?? ""}
+                        onChange={e => updateCoordinate(i, "lat", e.target.value)}
+                        placeholder="Latitude"
+                        style={{
+                          width: "100%",
+                          background: "rgba(155,48,255,0.05)",
+                          border: "0.5px solid rgba(155,48,255,0.15)",
+                          borderRadius: 6, padding: "6px 8px",
+                          color: "rgba(196,174,244,0.75)",
+                          fontSize: "0.7rem", outline: "none",
+                          fontFamily: "'DM Sans', sans-serif",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <input
+                        type="number"
+                        step="any"
+                        value={photo.lng ?? ""}
+                        onChange={e => updateCoordinate(i, "lng", e.target.value)}
+                        placeholder="Longitude"
+                        style={{
+                          width: "100%",
+                          background: "rgba(155,48,255,0.05)",
+                          border: "0.5px solid rgba(155,48,255,0.15)",
+                          borderRadius: 6, padding: "6px 8px",
+                          color: "rgba(196,174,244,0.75)",
+                          fontSize: "0.7rem", outline: "none",
+                          fontFamily: "'DM Sans', sans-serif",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPinPickerIndex(prev => (prev === i ? null : i))}
+                      style={{
+                        width: "100%",
+                        background: "rgba(155,48,255,0.15)",
+                        border: "0.5px solid rgba(155,48,255,0.3)",
+                        borderRadius: 6,
+                        padding: "6px 8px",
+                        color: "#EDE8F8",
+                        fontSize: "0.7rem",
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                        letterSpacing: "0.02em",
+                      }}
+                    >
+                      {pinPickerIndex === i ? "Hide draggable pin map" : "Drag pin on map"}
+                    </button>
+                    {pinPickerIndex === i && (
+                      <ManualPinPicker
+                        lat={photo.lat}
+                        lng={photo.lng}
+                        onChange={(nextLat, nextLng) => {
+                          updateItem(i, current => ({
+                            ...current,
+                            lat: nextLat,
+                            lng: nextLng,
+                            manualOverride: true,
+                            locationSource: "manual",
+                          }));
+                        }}
+                      />
+                    )}
+                    <div style={{
+                      fontSize: "0.6rem",
+                      color: "rgba(196,174,244,0.45)",
+                      fontFamily: "'DM Sans', sans-serif",
+                      letterSpacing: "0.02em",
+                    }}>
+                      Source: {photo.locationSource.toUpperCase()}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -733,21 +1221,21 @@ export default function TryPage() {
           {/* Bottom button */}
           <div style={{
             position: "sticky", bottom: 0,
-            background: "rgba(245,237,232,0.98)",
-            borderTop: "0.5px solid rgba(180,140,130,0.15)",
+            background: "rgba(10,8,20,0.98)",
+            borderTop: "0.5px solid rgba(155,48,255,0.1)",
             padding: "16px 0", marginTop: 24,
           }}>
             <button
               onClick={handleSaveAndAddAnother}
               style={{
                 width: "100%", height: 52,
-                background: "#DD9389", color: "#fff8f5",
+                background: "#9B30FF", color: "#EDE8F8",
                 border: "none", borderRadius: 100,
                 fontSize: "0.85rem", letterSpacing: "0.06em", cursor: "pointer",
                 fontFamily: "'DM Sans', sans-serif", transition: "background 0.2s",
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = "rgba(221,147,137,0.85)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "#DD9389")}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(155,48,255,0.8)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "#9B30FF")}
             >Save &amp; add another →</button>
           </div>
         </div>
