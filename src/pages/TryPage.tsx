@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import * as exifr from "exifr";
 import ShaderBackground from "../components/home/ShaderBackground";
 import { supabase } from "../lib/supabase";
-import AtlasStyledMap, { type MapPhotoPoint, type RepresentativePhoto } from "../components/AtlasStyledMap";
+import AtlasStyledMap, { type EntryMapMeta, type MapPhotoPoint, type RepresentativePhoto } from "../components/AtlasStyledMap";
 
 // ─────────────────────────────────────────────
 //  Neighborhood data
@@ -124,7 +124,154 @@ type PhotoMemory = {
   manualPlaceName: string;
 };
 
-type MemoryStore = Record<string, { photos: PhotoMemory[] }>;
+type NeighborhoodEntry = {
+  photos: PhotoMemory[];
+  moods: string[];
+  color: string;
+};
+
+type MemoryStore = Record<string, NeighborhoodEntry>;
+
+type AtlasIdentityStats = {
+  memoryCount: number;
+  topMoods: string[];
+  dominantMood: string;
+  dominantColor: string;
+  topDistrict: string;
+};
+
+type AtlasIdentityCopy = {
+  title: string;
+  narrative: string;
+  styleJudgment: string;
+  dominantMood: string;
+  dominantColor: string;
+};
+
+type AtlasMeta = {
+  creatorName: string;
+  customSubtitle?: string;
+  identity?: AtlasIdentityCopy;
+};
+
+const DEFAULT_ENTRY_COLOR = "#D8B26D";
+const MAX_MOODS = 3;
+const MOOD_PRESETS = [
+  "Calm",
+  "Warm",
+  "Nostalgic",
+  "Electric",
+  "Romantic",
+  "Dreamy",
+  "Melancholic",
+  "Bold",
+];
+
+const MOOD_COLOR_MAP: Record<string, string> = {
+  calm: "#7FA8FF",
+  warm: "#F2A356",
+  nostalgic: "#C9A1D8",
+  electric: "#FFD35B",
+  romantic: "#F58FA8",
+  dreamy: "#98B6FF",
+  melancholic: "#6C78A7",
+  bold: "#FF8A5B",
+};
+
+function suggestColorFromMood(mood: string | undefined): string {
+  if (!mood) return DEFAULT_ENTRY_COLOR;
+  return MOOD_COLOR_MAP[mood.trim().toLowerCase()] ?? DEFAULT_ENTRY_COLOR;
+}
+
+function normalizeMoods(input: string[]): string[] {
+  const deduped: string[] = [];
+  input.forEach((mood) => {
+    const trimmed = mood.trim();
+    if (!trimmed) return;
+    const canonical = trimmed.slice(0, 1).toUpperCase() + trimmed.slice(1);
+    if (!deduped.includes(canonical)) deduped.push(canonical);
+  });
+  return deduped.slice(0, MAX_MOODS);
+}
+
+function mostFrequent(items: string[], fallback: string): string {
+  if (items.length === 0) return fallback;
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const key = item.trim();
+    if (!key) return;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  let top = fallback;
+  let topCount = 0;
+  counts.forEach((count, key) => {
+    if (count > topCount) {
+      top = key;
+      topCount = count;
+    }
+  });
+  return top;
+}
+
+function getTopMoodsForIdentity(memories: MemoryStore, limit = 2): string[] {
+  const all = Object.values(memories).flatMap((entry) => entry.moods ?? []);
+  const counts = new Map<string, number>();
+  all.forEach((raw) => {
+    const mood = raw.trim();
+    if (!mood) return;
+    const key = mood.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([key]) => key.slice(0, 1).toUpperCase() + key.slice(1));
+}
+
+function computeIdentityStats(memories: MemoryStore): AtlasIdentityStats {
+  const entries = Object.entries(memories);
+  const memoryCount = entries.reduce((sum, [, entry]) => sum + entry.photos.length, 0);
+  const topMoods = getTopMoodsForIdentity(memories, 2);
+  const dominantMood = topMoods[0] ?? "Calm";
+  const colors = entries.map(([, entry]) => entry.color || suggestColorFromMood(entry.moods?.[0]));
+  const dominantColor = mostFrequent(colors, "#D8B26D");
+  const districts = entries.map(([slug]) => {
+    const hood = HOODS.find((h) => h.slug === slug);
+    return hood?.name || slug;
+  });
+  const topDistrict = mostFrequent(districts, "New York");
+  return { memoryCount, topMoods, dominantMood, dominantColor, topDistrict };
+}
+
+function generateIdentityCopy(
+  creatorName: string,
+  customSubtitle: string,
+  stats: AtlasIdentityStats,
+): AtlasIdentityCopy {
+  const cleanName = creatorName.trim() || "Your";
+  const title = `${cleanName}'s New York`;
+  const mood1 = (stats.topMoods[0] ?? "calm").toLowerCase();
+  const mood2 = (stats.topMoods[1] ?? "reflective").toLowerCase();
+  const descriptorPool = [
+    "soft light and slower moments",
+    "quiet streets and deliberate pauses",
+    "personal corners and late-hour reflections",
+    "small rituals and remembered evenings",
+  ];
+  const descriptor =
+    descriptorPool[(cleanName.length + stats.memoryCount + stats.topDistrict.length) % descriptorPool.length];
+  const narrative = customSubtitle.trim()
+    ? customSubtitle.trim()
+    : `A ${mood1}, ${mood2} view of New York shaped by ${descriptor}.`;
+  const styleJudgment = `Your NYC leans ${mood1}, ${mood2}, and cinematic.`;
+  return {
+    title,
+    narrative,
+    styleJudgment,
+    dominantMood: stats.dominantMood,
+    dominantColor: stats.dominantColor,
+  };
+}
 
 function loadDraft(): MemoryStore {
   try {
@@ -138,7 +285,15 @@ function loadDraft(): MemoryStore {
           typeof value === "object" &&
           Array.isArray((value as { photos?: unknown[] }).photos)
         ) {
-          return [slug, value as { photos: PhotoMemory[] }];
+          const next = value as { photos: PhotoMemory[]; moods?: string[]; color?: string };
+          return [
+            slug,
+            {
+              photos: next.photos,
+              moods: normalizeMoods(Array.isArray(next.moods) ? next.moods : []),
+              color: typeof next.color === "string" && next.color ? next.color : DEFAULT_ENTRY_COLOR,
+            },
+          ];
         }
         if (
           value &&
@@ -163,7 +318,7 @@ function loadDraft(): MemoryStore {
             },
           ];
         }
-        return [slug, { photos: [] }];
+        return [slug, { photos: [], moods: [], color: DEFAULT_ENTRY_COLOR }];
       }),
     );
   } catch {
@@ -421,11 +576,17 @@ export default function TryPage() {
 
   // Upload session state (reset per open)
   const [currentItems, setCurrentItems]     = useState<PhotoMemory[]>([]);
+  const [currentMoods, setCurrentMoods]     = useState<string[]>([]);
+  const [currentColor, setCurrentColor]     = useState<string>(DEFAULT_ENTRY_COLOR);
+  const [moodInput, setMoodInput]           = useState("");
   const [dragOver, setDragOver]             = useState(false);
   const [uploading, setUploading]           = useState(false);
   const [finishing, setFinishing]           = useState(false);
   const [uploadError, setUploadError]       = useState<string | null>(null);
   const [pinPickerIndex, setPinPickerIndex] = useState<number | null>(null);
+  const [showIdentityStep, setShowIdentityStep] = useState(false);
+  const [creatorName, setCreatorName] = useState("");
+  const [customSubtitle, setCustomSubtitle] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -436,6 +597,8 @@ export default function TryPage() {
         Object.entries(memories).map(([slug, data]) => [slug, {
           photoUrls: [],
           notes: data.photos.map(photo => photo.note),
+          moods: data.moods,
+          color: data.color,
         }])
       );
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(slim));
@@ -612,14 +775,20 @@ export default function TryPage() {
 
   const handleSaveAndAddAnother = () => {
     if (!selectedSlug) return;
+    const normalizedMoods = normalizeMoods(currentMoods);
     const updated: MemoryStore = {
       ...memories,
       [selectedSlug]: {
         photos: [...(memories[selectedSlug]?.photos ?? []), ...currentItems],
+        moods: normalizedMoods,
+        color: currentColor || suggestColorFromMood(normalizedMoods[0]),
       },
     };
     setMemories(updated);
     setCurrentItems([]);
+    setCurrentMoods([]);
+    setCurrentColor(DEFAULT_ENTRY_COLOR);
+    setMoodInput("");
     setShowUpload(false);
     setShowPanel(false);
     setSelectedSlug(null);
@@ -628,16 +797,33 @@ export default function TryPage() {
 
   const handleFinish = async () => {
     if (finishing) return;
+    if (!creatorName.trim()) {
+      setUploadError("Please add your name before generating your map.");
+      return;
+    }
     setFinishing(true);
     setUploadError(null);
     try {
+      const identityStats = computeIdentityStats(memories);
+      const identity = generateIdentityCopy(creatorName, customSubtitle, identityStats);
+
       // Build neighborhood_data: { [slug]: { notes, photoUrls } }
-      const neighborhoodData = Object.fromEntries(
+      const neighborhoodEntries = Object.fromEntries(
         Object.entries(memories).map(([slug, data]) => [slug, {
           notes: data.photos.map(photo => photo.note),
           photoUrls: data.photos.map(photo => photo.url),
+          moods: normalizeMoods(data.moods),
+          color: data.color || suggestColorFromMood(data.moods[0]),
         }])
       );
+      const neighborhoodData = {
+        ...neighborhoodEntries,
+        __meta: {
+          creatorName: creatorName.trim(),
+          customSubtitle: customSubtitle.trim() || undefined,
+          identity,
+        } as AtlasMeta,
+      };
 
       // Insert the atlas row
       const { error: atlasError } = await supabase
@@ -675,7 +861,11 @@ export default function TryPage() {
   // Open upload overlay for a neighborhood (new or existing)
   const reopenUpload = (slug: string) => {
     setSelectedSlug(slug);
-    setCurrentItems(memories[slug]?.photos ?? []);
+    const existing = memories[slug];
+    setCurrentItems(existing?.photos ?? []);
+    setCurrentMoods(existing?.moods ?? []);
+    setCurrentColor(existing?.color ?? DEFAULT_ENTRY_COLOR);
+    setMoodInput("");
     setShowPanel(true);
     setShowUpload(true);
     setPinPickerIndex(null);
@@ -690,6 +880,9 @@ export default function TryPage() {
       // Unlit block → show panel first
       setSelectedSlug(slug);
       setCurrentItems([]);
+      setCurrentMoods(memories[slug]?.moods ?? []);
+      setCurrentColor(memories[slug]?.color ?? DEFAULT_ENTRY_COLOR);
+      setMoodInput("");
       setShowPanel(true);
       setShowUpload(false);
       setPinPickerIndex(null);
@@ -701,6 +894,11 @@ export default function TryPage() {
       setShowPanel(false);
       setSelectedSlug(null);
     }
+  };
+
+  const requestFinish = () => {
+    setUploadError(null);
+    setShowIdentityStep(true);
   };
 
   const litSlugs = Object.keys(memories);
@@ -723,6 +921,16 @@ export default function TryPage() {
       return { hoodId: slug, url: first.url, lat: center.lat, lng: center.lng };
     })
     .filter((x): x is RepresentativePhoto => Boolean(x));
+  const entryMetaBySlug: Record<string, EntryMapMeta> = Object.fromEntries(
+    Object.entries(memories).map(([slug, data]) => [
+      slug,
+      {
+        moods: data.moods,
+        color: data.color,
+        previewUrl: data.photos[0]?.url,
+      },
+    ]),
+  );
 
   // ── Render ──
   return (
@@ -750,6 +958,16 @@ export default function TryPage() {
           filter: invert(95%) sepia(18%) saturate(382%) hue-rotate(355deg) brightness(101%) contrast(92%);
           opacity: 0.95;
         }
+        .atlas-pin-popup .mapboxgl-popup-content {
+          background: transparent !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          border-radius: 0 !important;
+        }
+        .atlas-pin-popup .mapboxgl-popup-tip {
+          border-top-color: rgba(139, 110, 196, 0.65) !important;
+          border-bottom-color: rgba(139, 110, 196, 0.65) !important;
+        }
         @keyframes tipFadeIn { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
 
@@ -766,6 +984,7 @@ export default function TryPage() {
           onBackgroundClick={handleMapBackgroundClick}
           photoPoints={mapPhotoPoints}
           representativePhotos={representativePhotos}
+          entryMetaBySlug={entryMetaBySlug}
           lockOverviewMinZoom
           markerStartOffset={0.35}
           detailPinZoom={13.2}
@@ -802,7 +1021,7 @@ export default function TryPage() {
                 {mappedCount} neighborhood{mappedCount !== 1 ? "s" : ""} mapped
               </span>
               <button
-                onClick={handleFinish}
+                onClick={requestFinish}
                 disabled={finishing}
                 style={{
                   fontSize: "0.72rem", color: finishing ? "rgba(255,255,255,0.3)" : "#ffffff",
@@ -864,7 +1083,15 @@ export default function TryPage() {
                 onMouseEnter={e => (e.currentTarget.style.background = "rgba(155,48,255,0.22)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "rgba(155,48,255,0.12)")}
               >
-                {getNeighborhoodName(slug)} · {data.photos.length} photo{data.photos.length !== 1 ? "s" : ""}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 999, background: data.color || DEFAULT_ENTRY_COLOR, boxShadow: `0 0 8px ${data.color || DEFAULT_ENTRY_COLOR}` }} />
+                  <span>{getNeighborhoodName(slug)} · {data.photos.length} photo{data.photos.length !== 1 ? "s" : ""}</span>
+                </div>
+                {data.moods.length > 0 && (
+                  <div style={{ fontSize: "0.62rem", color: "rgba(235, 220, 255, 0.72)", marginTop: 3, letterSpacing: "0.03em" }}>
+                    {data.moods.slice(0, 3).join(" · ")}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -875,7 +1102,7 @@ export default function TryPage() {
             }}>{uploadError}</p>
           )}
           <div
-            onClick={finishing ? undefined : handleFinish}
+            onClick={finishing ? undefined : requestFinish}
             style={{
               fontSize: "0.72rem", color: finishing ? "rgba(196,174,244,0.3)" : "#FFD700",
               cursor: finishing ? "default" : "pointer", marginTop: 12,
@@ -1033,6 +1260,83 @@ export default function TryPage() {
             style={{ display: "none" }}
             onChange={handleFileChange}
           />
+
+          {currentItems.length > 0 && (
+            <div style={{ marginTop: 16, border: "0.5px solid rgba(155,48,255,0.16)", borderRadius: 10, padding: "12px 12px 10px", background: "rgba(155,48,255,0.04)" }}>
+              <div style={{ fontSize: "0.64rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(196,174,244,0.56)", marginBottom: 8, fontFamily: "'DM Sans', sans-serif" }}>
+                How does this place feel?
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {MOOD_PRESETS.map((mood) => {
+                  const selected = currentMoods.includes(mood);
+                  return (
+                    <button
+                      key={mood}
+                      type="button"
+                      onClick={() => {
+                        setCurrentMoods((prev) => {
+                          if (prev.includes(mood)) return prev.filter((x) => x !== mood);
+                          if (prev.length >= MAX_MOODS) return prev;
+                          const next = [...prev, mood];
+                          if (next.length === 1) setCurrentColor(suggestColorFromMood(next[0]));
+                          return next;
+                        });
+                      }}
+                      style={{
+                        border: selected ? "0.5px solid rgba(255,215,122,0.7)" : "0.5px solid rgba(155,48,255,0.28)",
+                        background: selected ? "rgba(255,215,122,0.12)" : "rgba(155,48,255,0.07)",
+                        borderRadius: 999,
+                        padding: "4px 10px",
+                        color: selected ? "rgba(255,235,195,0.98)" : "rgba(225,209,250,0.8)",
+                        fontSize: "0.66rem",
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      {mood}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  value={moodInput}
+                  onChange={(e) => setMoodInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== ",") return;
+                    e.preventDefault();
+                    const candidate = moodInput.trim();
+                    if (!candidate) return;
+                    setCurrentMoods((prev) => {
+                      const next = normalizeMoods([...prev, candidate]);
+                      if (prev.length === 0 && next.length > 0) setCurrentColor(suggestColorFromMood(next[0]));
+                      return next;
+                    });
+                    setMoodInput("");
+                  }}
+                  placeholder={`Add mood tag (up to ${MAX_MOODS})`}
+                  style={{
+                    flex: 1,
+                    background: "rgba(155,48,255,0.05)",
+                    border: "0.5px solid rgba(155,48,255,0.2)",
+                    borderRadius: 6,
+                    padding: "6px 8px",
+                    color: "rgba(196,174,244,0.78)",
+                    fontSize: "0.7rem",
+                    outline: "none",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                />
+                <input
+                  type="color"
+                  value={currentColor}
+                  onChange={(e) => setCurrentColor(e.target.value)}
+                  title="Pick mood color"
+                  style={{ width: 30, height: 30, border: "none", background: "transparent", cursor: "pointer" }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Photo grid */}
           {currentItems.length > 0 && (
@@ -1237,6 +1541,127 @@ export default function TryPage() {
               onMouseEnter={e => (e.currentTarget.style.background = "rgba(155,48,255,0.8)")}
               onMouseLeave={e => (e.currentTarget.style.background = "#9B30FF")}
             >Save &amp; add another →</button>
+          </div>
+        </div>
+      </div>
+
+      {/* 8. Identity step before map generation */}
+      <div
+        onClick={() => { if (!finishing) setShowIdentityStep(false); }}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 90,
+          background: "rgba(10,8,20,0.72)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          opacity: showIdentityStep ? 1 : 0,
+          pointerEvents: showIdentityStep ? "all" : "none",
+          transition: "opacity 0.22s ease",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "24px",
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "100%",
+            maxWidth: 430,
+            borderRadius: 14,
+            border: "0.5px solid rgba(155,48,255,0.28)",
+            background: "rgba(14,10,26,0.95)",
+            padding: "18px 18px 16px",
+            boxShadow: "0 12px 34px rgba(8, 6, 18, 0.45)",
+          }}
+        >
+          <p style={{
+            fontFamily: "'DM Sans', sans-serif",
+            fontSize: "0.62rem",
+            textTransform: "uppercase",
+            letterSpacing: "0.12em",
+            color: "rgba(196,174,244,0.55)",
+            marginBottom: 8,
+          }}>
+            Whose New York is this?
+          </p>
+          <input
+            value={creatorName}
+            onChange={(e) => setCreatorName(e.target.value)}
+            placeholder="Your name"
+            maxLength={40}
+            style={{
+              width: "100%",
+              background: "rgba(155,48,255,0.05)",
+              border: "0.5px solid rgba(155,48,255,0.2)",
+              borderRadius: 8,
+              padding: "10px 12px",
+              color: "rgba(237,232,248,0.92)",
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.82rem",
+              marginBottom: 10,
+              outline: "none",
+            }}
+          />
+          <input
+            value={customSubtitle}
+            onChange={(e) => setCustomSubtitle(e.target.value)}
+            placeholder="Optional subtitle"
+            maxLength={110}
+            style={{
+              width: "100%",
+              background: "rgba(155,48,255,0.05)",
+              border: "0.5px solid rgba(155,48,255,0.2)",
+              borderRadius: 8,
+              padding: "10px 12px",
+              color: "rgba(206,186,240,0.85)",
+              fontFamily: "'Cormorant Garamond', serif",
+              fontStyle: "italic",
+              fontSize: "0.96rem",
+              marginBottom: 12,
+              outline: "none",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => setShowIdentityStep(false)}
+              style={{
+                background: "transparent",
+                border: "0.5px solid rgba(155,48,255,0.28)",
+                borderRadius: 999,
+                padding: "8px 12px",
+                color: "rgba(196,174,244,0.66)",
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: "0.68rem",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={handleFinish}
+              disabled={finishing}
+              style={{
+                background: "rgba(155,48,255,0.9)",
+                border: "none",
+                borderRadius: 999,
+                padding: "8px 14px",
+                color: "#EDE8F8",
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: "0.68rem",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                cursor: finishing ? "default" : "pointer",
+                opacity: finishing ? 0.6 : 1,
+              }}
+            >
+              {finishing ? "Generating..." : "Generate my map"}
+            </button>
           </div>
         </div>
       </div>

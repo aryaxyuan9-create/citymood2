@@ -17,6 +17,12 @@ export type RepresentativePhoto = {
   lng: number;
 };
 
+export type EntryMapMeta = {
+  moods?: string[];
+  color?: string;
+  previewUrl?: string;
+};
+
 const REGION_BOUNDS: [[number, number], [number, number]] = [
   [-74.055, 40.675],
   [-73.845, 40.895],
@@ -53,6 +59,7 @@ export default function AtlasStyledMap({
   onBackgroundClick,
   photoPoints,
   representativePhotos,
+  entryMetaBySlug,
   glowWeightsBySlug,
   showMarkers = true,
   lockOverviewMinZoom = false,
@@ -66,6 +73,7 @@ export default function AtlasStyledMap({
   onBackgroundClick?: () => void;
   photoPoints: MapPhotoPoint[];
   representativePhotos: RepresentativePhoto[];
+  entryMetaBySlug?: Record<string, EntryMapMeta>;
   glowWeightsBySlug?: Record<string, number>;
   showMarkers?: boolean;
   lockOverviewMinZoom?: boolean;
@@ -127,6 +135,72 @@ export default function AtlasStyledMap({
   const clearMarkers = () => {
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
+  };
+
+  const createPinPopup = (meta: EntryMapMeta | undefined, fallbackUrl?: string) => {
+    const moods = (meta?.moods ?? []).filter(Boolean).slice(0, 3);
+    const color = meta?.color || "#FFD700";
+    const preview = meta?.previewUrl || fallbackUrl;
+
+    const wrap = document.createElement("div");
+    wrap.style.minWidth = "160px";
+    wrap.style.maxWidth = "200px";
+    wrap.style.padding = "8px 9px";
+    wrap.style.borderRadius = "10px";
+    wrap.style.background = "rgba(10,8,20,0.94)";
+    wrap.style.border = `0.5px solid ${color}`;
+    wrap.style.boxShadow = `0 6px 18px rgba(8, 6, 16, 0.35), 0 0 12px ${color}44`;
+    wrap.style.color = "rgba(240,232,252,0.95)";
+    wrap.style.fontFamily = "'DM Sans', sans-serif";
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "7px";
+    row.style.marginBottom = moods.length || preview ? "6px" : "0";
+
+    const dot = document.createElement("span");
+    dot.style.width = "8px";
+    dot.style.height = "8px";
+    dot.style.borderRadius = "999px";
+    dot.style.background = color;
+    dot.style.boxShadow = `0 0 8px ${color}`;
+    dot.style.flexShrink = "0";
+
+    const colorLabel = document.createElement("span");
+    colorLabel.style.fontSize = "10px";
+    colorLabel.style.letterSpacing = "0.1em";
+    colorLabel.style.textTransform = "uppercase";
+    colorLabel.style.color = "rgba(210,189,246,0.78)";
+    colorLabel.textContent = color;
+
+    row.appendChild(dot);
+    row.appendChild(colorLabel);
+    wrap.appendChild(row);
+
+    if (moods.length > 0) {
+      const moodsEl = document.createElement("div");
+      moodsEl.style.fontSize = "11px";
+      moodsEl.style.letterSpacing = "0.03em";
+      moodsEl.style.color = "rgba(239,223,255,0.92)";
+      moodsEl.style.marginBottom = preview ? "6px" : "0";
+      moodsEl.textContent = moods.join(" · ");
+      wrap.appendChild(moodsEl);
+    }
+
+    if (preview) {
+      const img = document.createElement("img");
+      img.src = preview;
+      img.alt = "";
+      img.style.width = "100%";
+      img.style.height = "72px";
+      img.style.objectFit = "cover";
+      img.style.borderRadius = "7px";
+      img.style.border = "0.5px solid rgba(255,255,255,0.14)";
+      wrap.appendChild(img);
+    }
+
+    return wrap;
   };
 
   useEffect(() => {
@@ -385,20 +459,33 @@ export default function AtlasStyledMap({
     if (!showDetailedPins) {
       representativePhotos.forEach(rep => {
         if (!litIds.includes(rep.hoodId)) return;
+        const meta = entryMetaBySlug?.[rep.hoodId];
+        const pinColor = meta?.color || "#FFD700";
         const el = document.createElement("div");
         el.style.width = "30px";
         el.style.height = "30px";
         el.style.borderRadius = "8px";
         el.style.overflow = "hidden";
-        el.style.border = activeId === rep.hoodId ? "1.8px solid #FFD700" : "1px solid rgba(255,255,255,0.4)";
-        el.style.boxShadow = "0 3px 10px rgba(0,0,0,0.35)";
+        el.style.border = activeId === rep.hoodId ? `1.8px solid ${pinColor}` : `1px solid ${pinColor}99`;
+        el.style.boxShadow = `0 3px 10px rgba(0,0,0,0.35), 0 0 10px ${pinColor}55`;
         el.style.background = "rgba(9,7,16,0.9)";
         el.style.cursor = "pointer";
         el.innerHTML = `<img src="${rep.url}" alt="" style="width:100%;height:100%;object-fit:cover;" />`;
         el.onclick = () => onSelect(rep.hoodId);
+
+        const popup = new mapboxgl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          className: "atlas-pin-popup",
+          offset: 14,
+        }).setDOMContent(createPinPopup(meta, rep.url));
+
         const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
           .setLngLat([rep.lng, rep.lat])
+          .setPopup(popup)
           .addTo(map);
+        el.addEventListener("mouseenter", () => marker.togglePopup());
+        el.addEventListener("mouseleave", () => marker.togglePopup());
         markersRef.current.push(marker);
       });
       return;
@@ -407,21 +494,34 @@ export default function AtlasStyledMap({
     photoPoints.forEach(point => {
       if (!litIds.includes(point.neighborhoodSlug)) return;
       if (point.lat === null || point.lng === null) return;
+      const meta = entryMetaBySlug?.[point.neighborhoodSlug];
+      const pinColor = meta?.color || "#FFD700";
       const el = document.createElement("div");
       el.style.width = "14px";
       el.style.height = "14px";
       el.style.borderRadius = "999px";
-      el.style.border = "1.5px solid rgba(255,215,0,0.95)";
-      el.style.background = "rgba(255,215,0,0.24)";
-      el.style.boxShadow = "0 0 0 3px rgba(255,215,0,0.09)";
+      el.style.border = `1.5px solid ${pinColor}`;
+      el.style.background = `${pinColor}44`;
+      el.style.boxShadow = `0 0 0 3px ${pinColor}26`;
       el.style.cursor = "pointer";
       el.onclick = () => onSelect(point.neighborhoodSlug);
+
+      const popup = new mapboxgl.Popup({
+        closeButton: false,
+        closeOnClick: true,
+        className: "atlas-pin-popup",
+        offset: 12,
+      }).setDOMContent(createPinPopup(meta, point.url));
+
       const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
         .setLngLat([point.lng, point.lat])
+        .setPopup(popup)
         .addTo(map);
+      el.addEventListener("mouseenter", () => marker.togglePopup());
+      el.addEventListener("mouseleave", () => marker.togglePopup());
       markersRef.current.push(marker);
     });
-  }, [activeId, detailPinZoom, litIds, mapReady, markerStartOffset, onSelect, photoPoints, representativePhotos, showMarkers, zoom]);
+  }, [activeId, detailPinZoom, entryMetaBySlug, litIds, mapReady, markerStartOffset, onSelect, photoPoints, representativePhotos, showMarkers, zoom]);
 
   if (!mapToken) {
     return (
