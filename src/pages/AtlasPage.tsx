@@ -18,12 +18,25 @@ type Hood = {
 type NeighborhoodMemory = {
   notes: string[];
   photoUrls: string[];
+  moods?: string[];
+  color?: string;
 };
 
 type AtlasData = {
   id: string;
   createdAt: number;
   neighborhoods: Record<string, NeighborhoodMemory>;
+  meta?: {
+    creatorName?: string;
+    customSubtitle?: string;
+    identity?: {
+      title?: string;
+      narrative?: string;
+      styleJudgment?: string;
+      dominantMood?: string;
+      dominantColor?: string;
+    };
+  };
 };
 
 type PhotoPoint = {
@@ -32,6 +45,12 @@ type PhotoPoint = {
   url: string;
   lat: number | null;
   lng: number | null;
+};
+
+type EntryMapMeta = {
+  moods?: string[];
+  color?: string;
+  previewUrl?: string;
 };
 
 const HOOD_CENTER_COORDS: Record<string, { lat: number; lng: number }> = {
@@ -91,6 +110,118 @@ function stringSeed(input: string): number {
 function seededFloat(input: string): number {
   const seed = stringSeed(input);
   return (seed % 10000) / 10000;
+}
+
+function toTitleCaseMood(mood: string): string {
+  if (!mood) return mood;
+  return mood
+    .trim()
+    .split(/\s+/)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+const SUMMARY_DESCRIPTORS = [
+  "soft light and slower moments",
+  "quiet corners and remembered evenings",
+  "small rituals, late walks, and intimate streets",
+  "warm shadows and reflective pauses",
+];
+
+const MOOD_COLOR_FALLBACK: Record<string, string> = {
+  calm: "#7FA8FF",
+  nostalgic: "#C9A1D8",
+  energetic: "#FFD35B",
+  dreamy: "#98B6FF",
+  romantic: "#F58FA8",
+  melancholic: "#6C78A7",
+  warm: "#F2A356",
+  bold: "#FF8A5B",
+};
+
+function getDominantMood(moods: string[]): string | null {
+  const counts = new Map<string, number>();
+  moods.forEach((raw) => {
+    const mood = toTitleCaseMood(raw);
+    if (!mood) return;
+    const key = mood.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  let topKey: string | null = null;
+  let topCount = 0;
+  counts.forEach((count, key) => {
+    if (count > topCount) {
+      topCount = count;
+      topKey = key;
+    }
+  });
+  if (!topKey) return null;
+  return topKey
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getDominantColor(colors: string[], dominantMood: string | null): string {
+  const counts = new Map<string, number>();
+  colors.forEach((color) => {
+    const hex = (color || "").trim();
+    if (!hex) return;
+    counts.set(hex.toLowerCase(), (counts.get(hex.toLowerCase()) ?? 0) + 1);
+  });
+  let topColor: string | null = null;
+  let topCount = 0;
+  counts.forEach((count, color) => {
+    if (count > topCount) {
+      topCount = count;
+      topColor = color;
+    }
+  });
+  if (topColor) return topColor;
+  if (dominantMood) {
+    const fromMood = MOOD_COLOR_FALLBACK[dominantMood.toLowerCase()];
+    if (fromMood) return fromMood;
+  }
+  return "#D8B26D";
+}
+
+function generateSummary(topMoods: string[], seed: string): string {
+  const first = topMoods[0] ? topMoods[0].toLowerCase() : "quiet";
+  const second = topMoods[1] ? topMoods[1].toLowerCase() : "nostalgic";
+  const descriptor = SUMMARY_DESCRIPTORS[stringSeed(seed) % SUMMARY_DESCRIPTORS.length];
+  return `A ${first}, ${second} view of New York shaped by ${descriptor}.`;
+}
+
+function getTopMoods(moods: string[], limit = 2): string[] {
+  const counts = new Map<string, number>();
+  moods.forEach((raw) => {
+    const mood = toTitleCaseMood(raw);
+    if (!mood) return;
+    const key = mood.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([key]) =>
+      key
+        .split(" ")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" "),
+    );
+}
+
+function getColorToneLabel(color: string): string {
+  const hex = color.replace("#", "");
+  if (hex.length !== 6) return "Soft violet";
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return "Soft violet";
+  if (b >= r && b >= g) return "Soft blue";
+  if (r >= g && r >= b) return "Warm amber";
+  if (g >= r && g >= b) return "Muted green";
+  return "Soft violet";
 }
 
 // ─────────────────────────────────────────────
@@ -199,13 +330,14 @@ const HOODS: Hood[] = [
 //  Atlas SVG Map — read-only with lit + active
 // ─────────────────────────────────────────────
 function AtlasMap({
-  litIds, activeId, onSelect, photoPoints, representativePhotos,
+  litIds, activeId, onSelect, photoPoints, representativePhotos, entryMetaBySlug,
 }: {
   litIds: string[];
   activeId: string | null;
   onSelect: (id: string) => void;
   photoPoints: PhotoPoint[];
   representativePhotos: Array<{ hoodId: string; url: string; lat: number; lng: number }>;
+  entryMetaBySlug?: Record<string, EntryMapMeta>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -218,6 +350,72 @@ function AtlasMap({
   const clearMarkers = () => {
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
+  };
+
+  const createPinPopup = (meta: EntryMapMeta | undefined, fallbackUrl?: string) => {
+    const moods = (meta?.moods ?? []).filter(Boolean).slice(0, 3);
+    const color = meta?.color || "#FFD700";
+    const preview = meta?.previewUrl || fallbackUrl;
+
+    const wrap = document.createElement("div");
+    wrap.style.minWidth = "160px";
+    wrap.style.maxWidth = "200px";
+    wrap.style.padding = "8px 9px";
+    wrap.style.borderRadius = "10px";
+    wrap.style.background = "rgba(10,8,20,0.94)";
+    wrap.style.border = `0.5px solid ${color}`;
+    wrap.style.boxShadow = `0 6px 18px rgba(8, 6, 16, 0.35), 0 0 12px ${color}44`;
+    wrap.style.color = "rgba(240,232,252,0.95)";
+    wrap.style.fontFamily = "'DM Sans', sans-serif";
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "7px";
+    row.style.marginBottom = moods.length || preview ? "6px" : "0";
+
+    const dot = document.createElement("span");
+    dot.style.width = "8px";
+    dot.style.height = "8px";
+    dot.style.borderRadius = "999px";
+    dot.style.background = color;
+    dot.style.boxShadow = `0 0 8px ${color}`;
+    dot.style.flexShrink = "0";
+
+    const colorLabel = document.createElement("span");
+    colorLabel.style.fontSize = "10px";
+    colorLabel.style.letterSpacing = "0.1em";
+    colorLabel.style.textTransform = "uppercase";
+    colorLabel.style.color = "rgba(210,189,246,0.78)";
+    colorLabel.textContent = color;
+
+    row.appendChild(dot);
+    row.appendChild(colorLabel);
+    wrap.appendChild(row);
+
+    if (moods.length > 0) {
+      const moodsEl = document.createElement("div");
+      moodsEl.style.fontSize = "11px";
+      moodsEl.style.letterSpacing = "0.03em";
+      moodsEl.style.color = "rgba(239,223,255,0.92)";
+      moodsEl.style.marginBottom = preview ? "6px" : "0";
+      moodsEl.textContent = moods.join(" · ");
+      wrap.appendChild(moodsEl);
+    }
+
+    if (preview) {
+      const img = document.createElement("img");
+      img.src = preview;
+      img.alt = "";
+      img.style.width = "100%";
+      img.style.height = "72px";
+      img.style.objectFit = "cover";
+      img.style.borderRadius = "7px";
+      img.style.border = "0.5px solid rgba(255,255,255,0.14)";
+      wrap.appendChild(img);
+    }
+
+    return wrap;
   };
 
   useEffect(() => {
@@ -523,20 +721,34 @@ function AtlasMap({
     const showDetailedPins = zoom >= 13.2;
     if (!showDetailedPins) {
       representativePhotos.forEach(rep => {
+        const meta = entryMetaBySlug?.[rep.hoodId];
+        const pinColor = meta?.color || "#FFD700";
         const el = document.createElement("div");
         el.style.width = "30px";
         el.style.height = "30px";
         el.style.borderRadius = "8px";
         el.style.overflow = "hidden";
-        el.style.border = activeId === rep.hoodId ? "1.8px solid #FFD700" : "1px solid rgba(255,255,255,0.4)";
-        el.style.boxShadow = "0 3px 10px rgba(0,0,0,0.35)";
+        el.style.border = activeId === rep.hoodId ? `1.8px solid ${pinColor}` : `1px solid ${pinColor}99`;
+        el.style.boxShadow = `0 3px 10px rgba(0,0,0,0.35), 0 0 12px ${pinColor}70`;
+        el.style.outline = `1px solid ${pinColor}66`;
         el.style.background = "rgba(9,7,16,0.9)";
         el.style.cursor = "pointer";
         el.innerHTML = `<img src="${rep.url}" alt="" style="width:100%;height:100%;object-fit:cover;" />`;
         el.onclick = () => onSelect(rep.hoodId);
+
+        const popup = new mapboxgl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          className: "atlas-pin-popup",
+          offset: 14,
+        }).setDOMContent(createPinPopup(meta, rep.url));
+
         const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
           .setLngLat([rep.lng, rep.lat])
+          .setPopup(popup)
           .addTo(map);
+        el.addEventListener("mouseenter", () => marker.getPopup()?.addTo(map));
+        el.addEventListener("mouseleave", () => marker.getPopup()?.remove());
         markersRef.current.push(marker);
       });
       return;
@@ -548,21 +760,34 @@ function AtlasMap({
       if (!fallback && (point.lat === null || point.lng === null)) return;
       const lat = point.lat ?? fallback.lat;
       const lng = point.lng ?? fallback.lng;
+      const meta = entryMetaBySlug?.[point.neighborhoodSlug];
+      const pinColor = meta?.color || "#FFD700";
       const el = document.createElement("div");
-      el.style.width = "14px";
-      el.style.height = "14px";
+      el.style.width = "15px";
+      el.style.height = "15px";
       el.style.borderRadius = "999px";
-      el.style.border = "1.5px solid rgba(255,215,0,0.95)";
-      el.style.background = "rgba(255,215,0,0.24)";
-      el.style.boxShadow = "0 0 0 3px rgba(255,215,0,0.09)";
+      el.style.border = `1.5px solid ${pinColor}`;
+      el.style.background = `${pinColor}44`;
+      el.style.boxShadow = `0 0 0 4px ${pinColor}2F, 0 0 10px ${pinColor}7A`;
       el.style.cursor = "pointer";
       el.onclick = () => onSelect(point.neighborhoodSlug);
+
+      const popup = new mapboxgl.Popup({
+        closeButton: false,
+        closeOnClick: true,
+        className: "atlas-pin-popup",
+        offset: 12,
+      }).setDOMContent(createPinPopup(meta, point.url));
+
       const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
         .setLngLat([lng, lat])
+        .setPopup(popup)
         .addTo(map);
+      el.addEventListener("mouseenter", () => marker.getPopup()?.addTo(map));
+      el.addEventListener("mouseleave", () => marker.getPopup()?.remove());
       markersRef.current.push(marker);
     });
-  }, [activeId, litIds, mapReady, onSelect, photoPoints, representativePhotos, zoom]);
+  }, [activeId, entryMetaBySlug, litIds, mapReady, onSelect, photoPoints, representativePhotos, zoom]);
 
   if (!mapToken) {
     return (
@@ -617,10 +842,16 @@ export default function AtlasPage() {
       .single()
       .then(({ data: row, error }) => {
         if (error || !row) { setNotFound(true); return; }
+        const rawNeighborhoodData = (row.neighborhood_data ?? {}) as Record<string, unknown>;
+        const meta = (rawNeighborhoodData.__meta ?? undefined) as AtlasData["meta"];
+        const neighborhoods = Object.fromEntries(
+          Object.entries(rawNeighborhoodData).filter(([key]) => key !== "__meta"),
+        ) as Record<string, NeighborhoodMemory>;
         setData({
           id: row.id,
           createdAt: new Date(row.created_at).getTime(),
-          neighborhoods: row.neighborhood_data,
+          neighborhoods,
+          meta,
         });
       });
   }, [id]);
@@ -713,6 +944,34 @@ export default function AtlasPage() {
   const litIds = mappedHoods.map(h => h.id);
   const selectableIds = HOODS.map(h => h.id);
   const totalPhotos = mappedHoods.reduce((sum, h) => sum + (data.neighborhoods[h.id]?.photoUrls?.length ?? 0), 0);
+  const flattenedMoods = mappedHoods.flatMap((hood) => data.neighborhoods[hood.id]?.moods ?? []);
+  const topMoods = getTopMoods(flattenedMoods, 2);
+  const dominantMood = getDominantMood(flattenedMoods);
+  const colorsFromEntries = mappedHoods.map((hood) => data.neighborhoods[hood.id]?.color || hood.accent);
+  const dominantColor = getDominantColor(colorsFromEntries, dominantMood);
+  const summaryText = generateSummary(topMoods, data.id);
+  const creatorName = data.meta?.creatorName?.trim();
+  const identityTitle = data.meta?.identity?.title || (creatorName ? `${creatorName}'s New York` : "Your New York");
+  const identityNarrative = data.meta?.identity?.narrative || summaryText;
+  const identityStyleJudgment = data.meta?.identity?.styleJudgment
+    || `Your NYC leans ${(topMoods[0] ?? "calm").toLowerCase()}, ${(topMoods[1] ?? "nostalgic").toLowerCase()}, and cinematic.`;
+  const customSubtitle = data.meta?.customSubtitle?.trim() || "";
+  const moodLegend = (() => {
+    const seen = new Set<string>();
+    const rows: Array<{ mood: string; color: string }> = [];
+    mappedHoods.forEach((hood) => {
+      const mem = data.neighborhoods[hood.id];
+      const moods = (mem?.moods ?? []).map(toTitleCaseMood).filter(Boolean);
+      const color = mem?.color || hood.accent;
+      moods.forEach((mood) => {
+        const key = mood.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push({ mood, color });
+      });
+    });
+    return rows;
+  })();
 
   const shareUrl = `${window.location.origin}/atlas/${id}`;
 
@@ -737,6 +996,21 @@ export default function AtlasPage() {
       return { hoodId: hood.id, url: urls[index], lat: fallback.lat, lng: fallback.lng };
     })
     .filter((x): x is { hoodId: string; url: string; lat: number; lng: number } => Boolean(x));
+  const entryMetaBySlug: Record<string, EntryMapMeta> = Object.fromEntries(
+    mappedHoods.map((hood) => {
+      const mem = data.neighborhoods[hood.id];
+      const urlsFromRows = photoPoints.filter(p => p.neighborhoodSlug === hood.id).map(p => p.url);
+      const previewUrl = urlsFromRows[0] || mem?.photoUrls?.[0];
+      return [
+        hood.id,
+        {
+          moods: mem?.moods ?? [],
+          color: mem?.color ?? hood.accent,
+          previewUrl,
+        },
+      ];
+    }),
+  );
 
   const handleHoodSelect = (id: string) => {
     setActiveId(prev => prev === id ? null : id);
@@ -778,6 +1052,16 @@ export default function AtlasPage() {
         .mapboxgl-ctrl-group .mapboxgl-ctrl-icon {
           filter: invert(95%) sepia(18%) saturate(382%) hue-rotate(355deg) brightness(101%) contrast(92%);
           opacity: 0.95;
+        }
+        .atlas-pin-popup .mapboxgl-popup-content {
+          background: transparent !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          border-radius: 0 !important;
+        }
+        .atlas-pin-popup .mapboxgl-popup-tip {
+          border-top-color: rgba(139, 110, 196, 0.65) !important;
+          border-bottom-color: rgba(139, 110, 196, 0.65) !important;
         }
       `}</style>
 
@@ -835,7 +1119,73 @@ export default function AtlasPage() {
             fontFamily: "'Cormorant Garamond', serif", fontSize: "4.5rem", fontWeight: 300,
             color: "#EDE8F8", letterSpacing: "-0.02em", lineHeight: 0.92,
             marginBottom: "10px",
-          }}>Your New<br /><em>York</em></h1>
+          }}>{identityTitle.split(" ").slice(0, 2).join(" ")}<br /><em>{identityTitle.split(" ").slice(2).join(" ") || "In Color"}</em></h1>
+
+          <div style={{ marginBottom: "14px" }}>
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif", fontSize: "0.68rem",
+              letterSpacing: "0.14em", textTransform: "uppercase",
+              color: "rgba(196,174,244,0.45)", marginBottom: "6px",
+            }}>
+              Your NYC feels like
+            </p>
+            <p style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontStyle: "italic",
+              fontSize: "0.98rem",
+              color: "rgba(210,188,245,0.62)",
+              lineHeight: 1.55,
+              marginBottom: "8px",
+            }}>
+              {identityNarrative}
+            </p>
+            {customSubtitle ? (
+              <p style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontStyle: "italic",
+                fontSize: "0.88rem",
+                color: "rgba(196,174,244,0.52)",
+                lineHeight: 1.45,
+                marginBottom: "8px",
+              }}>
+                {customSubtitle}
+              </p>
+            ) : null}
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.68rem",
+              color: "rgba(206,186,240,0.58)",
+              letterSpacing: "0.04em",
+              marginBottom: "4px",
+            }}>
+              {identityStyleJudgment}
+            </p>
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.68rem",
+              color: "rgba(206,186,240,0.58)",
+              letterSpacing: "0.04em",
+              marginBottom: "4px",
+            }}>
+              Most common mood: {dominantMood ?? "Quiet"}
+            </p>
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.68rem",
+              color: "rgba(206,186,240,0.58)",
+              letterSpacing: "0.04em",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}>
+              <span style={{
+                width: "7px", height: "7px", borderRadius: "50%",
+                background: dominantColor, boxShadow: `0 0 7px ${dominantColor}`,
+                flexShrink: 0,
+              }} />
+              Dominant tone: {getColorToneLabel(dominantColor)}
+            </p>
+          </div>
 
           {/* Subtext */}
           <p style={{
@@ -854,6 +1204,8 @@ export default function AtlasPage() {
               const mem = data.neighborhoods[hood.id];
               const hasPhotos = (mem?.photoUrls?.length ?? 0) > 0;
               const isActive = activeId === hood.id;
+              const moodTags = (mem?.moods ?? []).slice(0, 3);
+              const moodColor = mem?.color || hood.accent;
               return (
                 <div
                   key={hood.id}
@@ -887,14 +1239,27 @@ export default function AtlasPage() {
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                       <div style={{
                         width: "5px", height: "5px", borderRadius: "50%",
-                        background: hood.accent, opacity: isActive ? 1 : 0.5,
-                        boxShadow: isActive ? `0 0 8px ${hood.accent}` : "none",
+                        background: moodColor, opacity: isActive ? 1 : 0.5,
+                        boxShadow: isActive ? `0 0 8px ${moodColor}` : "none",
                         transition: "all 0.3s", flexShrink: 0,
                       }} />
-                      <span className="hood-name" style={{
-                        fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem", fontWeight: 400,
-                        color: "rgba(237,232,248,0.8)", transition: "font-style 0.2s",
-                      }}>{hood.name}</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span className="hood-name" style={{
+                          fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem", fontWeight: 400,
+                          color: "rgba(237,232,248,0.8)", transition: "font-style 0.2s",
+                        }}>{hood.name}</span>
+                        {moodTags.length > 0 && (
+                          <span style={{
+                            fontFamily: "'DM Sans', sans-serif",
+                            fontSize: "0.62rem",
+                            letterSpacing: "0.04em",
+                            color: "rgba(224,205,255,0.64)",
+                            textTransform: "uppercase",
+                          }}>
+                            {moodTags.join(" · ")}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 </div>
@@ -904,6 +1269,40 @@ export default function AtlasPage() {
 
           {/* Divider */}
           <div style={{ height: "0.5px", background: "rgba(155,48,255,0.1)", marginBottom: "20px" }} />
+
+          {/* Mood legend */}
+          <div style={{ marginBottom: "22px" }}>
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif", fontSize: "0.7rem",
+              letterSpacing: "0.15em", textTransform: "uppercase",
+              color: "rgba(196,174,244,0.4)", marginBottom: "10px",
+            }}>Mood</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+              {moodLegend.length > 0 ? moodLegend.map((row) => (
+                <div key={row.mood.toLowerCase()} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{
+                    width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0,
+                    background: row.color, boxShadow: `0 0 8px ${row.color}`,
+                  }} />
+                  <span style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    fontSize: "1rem",
+                    color: "rgba(235,226,248,0.76)",
+                    lineHeight: 1.2,
+                  }}>{row.mood}</span>
+                </div>
+              )) : (
+                <p style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  fontStyle: "italic",
+                  fontSize: "0.95rem",
+                  color: "rgba(196,174,244,0.45)",
+                }}>
+                  No mood tags yet.
+                </p>
+              )}
+            </div>
+          </div>
 
           {/* Share section */}
           <div>
@@ -961,6 +1360,7 @@ export default function AtlasPage() {
               onSelect={handleHoodSelect}
               photoPoints={photoPoints}
               representativePhotos={representativePhotos}
+              entryMetaBySlug={entryMetaBySlug}
             />
           </div>
 

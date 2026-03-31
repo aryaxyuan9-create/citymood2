@@ -11,6 +11,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export type NeighborhoodMemory = {
   notes: string[];
   photoUrls: string[];
+  moods?: string[];
+  color?: string;
 };
 
 export type AtlasRow = {
