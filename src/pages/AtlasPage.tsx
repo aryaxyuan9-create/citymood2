@@ -1197,6 +1197,11 @@ export default function AtlasPage() {
     }),
   );
 
+  const emotionRegions = Object.entries(entryMetaBySlug).map(([slug, meta]) => ({
+    neighborhood: HOODS.find(h => h.id === slug)?.name ?? slug,
+    emotion: { color: meta.color ?? '#D8B26D', dim: (meta.color ?? '#D8B26D') + '59' },
+  }));
+
   const handleHoodSelect = (id: string) => {
     setActiveId(prev => prev === id ? null : id);
     const mem = data.neighborhoods[id];
@@ -1563,6 +1568,7 @@ export default function AtlasPage() {
               lockOverviewMinZoom
               markerStartOffset={0.35}
               detailPinZoom={13.2}
+              emotionRegions={emotionRegions}
             />
           </div>
 

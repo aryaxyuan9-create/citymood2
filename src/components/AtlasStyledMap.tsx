@@ -540,7 +540,6 @@ export default function AtlasStyledMap({
   }, [entryMetaBySlug, mapReady, photoPoints, safeEmotionOpacityBoost, safeEmotionRadiusBoost]);
 
   useEffect(() => {
-    console.log('hoods-fill updating with:', emotionRegions);
     if (!mapRef.current || !emotionRegions?.length) return;
     const map = mapRef.current;
     if (map.getLayer('hoods-fill')) {
