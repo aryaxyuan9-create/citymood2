@@ -906,6 +906,7 @@ export default function TryPage() {
           continue;
         }
         try {
+          console.log('photo keys:', Object.keys(photo), 'has file:', !!(photo as unknown as Record<string, unknown>).file, 'url:', photo.url);
           const blob = await fetch(photo.url).then(r => r.blob());
           const base64 = await fileToBase64(blob as File);
           const emotionId = await analyzePhoto({ imageBase64: base64 });
