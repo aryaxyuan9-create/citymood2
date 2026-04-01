@@ -936,8 +936,14 @@ export default function TryPage() {
     }
     const draftAreaDefaults: Record<string, string[]> = Object.fromEntries(
       Object.entries(withAISuggestions).map(([slug, entry]) => {
-        const moods = normalizeMoods(entry.photos.flatMap((photo) => photo.moods ?? []));
-        return [slug, moods.length > 0 ? moods : normalizeMoods(entry.moods ?? [])];
+        const moodCounts: Record<string, number> = {};
+        for (const photo of entry.photos) {
+          for (const mood of photo.moods ?? []) {
+            moodCounts[mood] = (moodCounts[mood] || 0) + 1;
+          }
+        }
+        const dominant = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+        return [slug, dominant ? [dominant] : (entry.moods ?? [])];
       }),
     );
     setMemories(withAISuggestions);
