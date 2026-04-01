@@ -28,14 +28,15 @@ export type EntryMapMeta = {
   previewUrl?: string;
 };
 
-function buildFillColorMatch(regions: Array<{ neighborhood: string; emotion: { color: string } }>) {
-  if (!regions.length) return 'rgba(0,0,0,0)'
-  const match: (string | string[])[] = ['match', ['get', 'name']]
-  for (const r of regions) {
-    match.push(r.neighborhood, r.emotion.color)
+function buildFillColorMatch(entryMeta: Record<string, EntryMapMeta> | undefined) {
+  const entries = Object.entries(entryMeta ?? {}).filter(([, m]) => m.color);
+  if (!entries.length) return 'rgba(0,0,0,0)';
+  const match: (string | string[])[] = ['match', ['get', 'slug']];
+  for (const [slug, meta] of entries) {
+    match.push(slug, meta.color!);
   }
-  match.push('rgba(0,0,0,0)')
-  return match
+  match.push('rgba(0,0,0,0)');
+  return match;
 }
 
 const REGION_BOUNDS: [[number, number], [number, number]] = [
@@ -375,7 +376,7 @@ export default function AtlasStyledMap({
           type: 'fill',
           source: 'hoods',
           paint: {
-            'fill-color': buildFillColorMatch(emotionRegions ?? []) as mapboxgl.Expression,
+            'fill-color': buildFillColorMatch(entryMetaBySlug) as mapboxgl.Expression,
             'fill-opacity': 0.35,
           },
         });
@@ -540,12 +541,12 @@ export default function AtlasStyledMap({
   }, [entryMetaBySlug, mapReady, photoPoints, safeEmotionOpacityBoost, safeEmotionRadiusBoost]);
 
   useEffect(() => {
-    if (!mapRef.current || !emotionRegions?.length) return;
     const map = mapRef.current;
+    if (!map || !mapReady) return;
     if (map.getLayer('hoods-fill')) {
-      map.setPaintProperty('hoods-fill', 'fill-color', buildFillColorMatch(emotionRegions) as mapboxgl.Expression);
+      map.setPaintProperty('hoods-fill', 'fill-color', buildFillColorMatch(entryMetaBySlug) as mapboxgl.Expression);
     }
-  }, [emotionRegions]);
+  }, [entryMetaBySlug, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;

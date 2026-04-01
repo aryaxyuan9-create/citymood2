@@ -1374,7 +1374,6 @@ export default function TryPage() {
   if (routeStep === "generating") {
     const litCount = Math.max(1, Math.ceil((mappedRegions.length || 1) * ((generationStep + 1) / 3)));
     const generatingLitIds = mappedRegions.slice(0, litCount).map(([slug]) => slug);
-    const emotionRegions = Object.entries(entryMetaBySlug ?? {}).filter(([, m]) => m.color).map(([slug, m]) => ({ neighborhood: getNeighborhoodName(slug), emotion: { color: m.color!, dim: m.color! + '59' } }));
     return (
       <div style={{ width: "100vw", height: "100vh", overflow: "hidden", position: "relative" }}>
         <ShaderBackground />
@@ -1391,7 +1390,6 @@ export default function TryPage() {
             lockOverviewMinZoom
             markerStartOffset={0.35}
             detailPinZoom={13.2}
-            emotionRegions={emotionRegions}
           />
         </div>
         <nav style={{
@@ -1633,7 +1631,6 @@ export default function TryPage() {
           lockOverviewMinZoom
           markerStartOffset={0.35}
           detailPinZoom={13.2}
-          emotionRegions={Object.entries(entryMetaBySlug ?? {}).filter(([, m]) => m.color).map(([slug, m]) => ({ neighborhood: getNeighborhoodName(slug), emotion: { color: m.color!, dim: m.color! + '59' } }))}
         />
       </div>
 
