@@ -1390,6 +1390,7 @@ export default function TryPage() {
             lockOverviewMinZoom
             markerStartOffset={0.35}
             detailPinZoom={13.2}
+            emotionRegions={Object.entries(entryMetaBySlug ?? {}).filter(([, m]) => m.color).map(([slug, m]) => ({ neighborhood: getNeighborhoodName(slug), emotion: { color: m.color!, dim: m.color! + '59' } }))}
           />
         </div>
         <nav style={{
@@ -1631,6 +1632,7 @@ export default function TryPage() {
           lockOverviewMinZoom
           markerStartOffset={0.35}
           detailPinZoom={13.2}
+          emotionRegions={Object.entries(entryMetaBySlug ?? {}).filter(([, m]) => m.color).map(([slug, m]) => ({ neighborhood: getNeighborhoodName(slug), emotion: { color: m.color!, dim: m.color! + '59' } }))}
         />
       </div>
 

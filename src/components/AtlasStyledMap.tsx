@@ -28,6 +28,16 @@ export type EntryMapMeta = {
   previewUrl?: string;
 };
 
+function buildFillColorMatch(regions: Array<{ neighborhood: string; emotion: { color: string } }>) {
+  if (!regions.length) return 'rgba(0,0,0,0)'
+  const match: (string | string[])[] = ['match', ['get', 'name']]
+  for (const r of regions) {
+    match.push(r.neighborhood, r.emotion.color)
+  }
+  match.push('rgba(0,0,0,0)')
+  return match
+}
+
 const REGION_BOUNDS: [[number, number], [number, number]] = [
   [-74.055, 40.675],
   [-73.845, 40.895],
@@ -73,6 +83,7 @@ export default function AtlasStyledMap({
   emotionRadiusBoost = 1,
   emotionOpacityBoost = 1,
   interactiveAreas = true,
+  emotionRegions,
 }: {
   litIds: string[];
   selectableIds?: string[];
@@ -90,6 +101,7 @@ export default function AtlasStyledMap({
   emotionRadiusBoost?: number;
   emotionOpacityBoost?: number;
   interactiveAreas?: boolean;
+  emotionRegions?: Array<{ neighborhood: string; emotion: { color: string; dim: string } }>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -357,6 +369,18 @@ export default function AtlasStyledMap({
         data: "/nyc-neighborhoods-filtered.geojson",
       });
 
+      if (!map.getLayer('hoods-fill')) {
+        map.addLayer({
+          id: 'hoods-fill',
+          type: 'fill',
+          source: 'hoods',
+          paint: {
+            'fill-color': buildFillColorMatch(emotionRegions ?? []) as mapboxgl.Expression,
+            'fill-opacity': 0.35,
+          },
+        });
+      }
+
       map.addLayer({
         id: "hoods-hit",
         type: "fill",
@@ -514,6 +538,14 @@ export default function AtlasStyledMap({
       ]);
     }
   }, [entryMetaBySlug, mapReady, photoPoints, safeEmotionOpacityBoost, safeEmotionRadiusBoost]);
+
+  useEffect(() => {
+    if (!mapRef.current || !emotionRegions?.length) return;
+    const map = mapRef.current;
+    if (map.getLayer('hoods-fill')) {
+      map.setPaintProperty('hoods-fill', 'fill-color', buildFillColorMatch(emotionRegions) as mapboxgl.Expression);
+    }
+  }, [emotionRegions]);
 
   useEffect(() => {
     const map = mapRef.current;
