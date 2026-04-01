@@ -901,7 +901,7 @@ export default function TryPage() {
     for (const [slug, entry] of Object.entries(mergedMemories)) {
       const processedPhotos: PhotoMemory[] = [];
       for (const photo of entry.photos) {
-        if ((photo.moods?.length ?? 0) > 0) {
+        if (photo.source === 'manual') {
           processedPhotos.push(photo);
           continue;
         }
