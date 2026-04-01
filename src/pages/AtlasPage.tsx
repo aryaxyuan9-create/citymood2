@@ -5,6 +5,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import ShaderBackground from "../components/home/ShaderBackground";
 import { supabase } from "../lib/supabase";
 import NeighborhoodGallery from "../components/NeighborhoodGallery";
+import AtlasStyledMap from "../components/AtlasStyledMap";
 
 // ─────────────────────────────────────────────
 //  Types
@@ -20,6 +21,15 @@ type NeighborhoodMemory = {
   photoUrls: string[];
   moods?: string[];
   color?: string;
+  areaDefaultMoods?: string[];
+  memories?: Array<{
+    moods?: string[];
+    color?: string;
+    styleHint?: "dreamy" | "cinematic" | "soft" | "vivid" | "muted";
+  }>;
+  isDriftEntry?: boolean;
+  driftPrompt?: string;
+  capturedMoodFirst?: boolean;
 };
 
 type AtlasData = {
@@ -183,6 +193,20 @@ function getDominantColor(colors: string[], dominantMood: string | null): string
     if (fromMood) return fromMood;
   }
   return "#D8B26D";
+}
+
+function normalizeNeighborhoodMemory(raw: NeighborhoodMemory): NeighborhoodMemory {
+  const memoryRows = Array.isArray(raw.memories) ? raw.memories : [];
+  const inferredMoods = memoryRows.flatMap((row) => row.moods ?? []).filter(Boolean);
+  const inferredColor = memoryRows.find((row) => typeof row.color === "string" && row.color.trim())?.color;
+  const areaDefaults = Array.isArray(raw.areaDefaultMoods) ? raw.areaDefaultMoods : [];
+  return {
+    ...raw,
+    moods: (areaDefaults.length > 0 ? areaDefaults : (raw.moods && raw.moods.length > 0 ? raw.moods : inferredMoods))
+      .map(toTitleCaseMood)
+      .filter(Boolean),
+    color: (raw.color && raw.color.trim()) || inferredColor || raw.color,
+  };
 }
 
 function generateSummary(topMoods: string[], seed: string): string {
@@ -352,6 +376,19 @@ function AtlasMap({
     markersRef.current = [];
   };
 
+  const buildEntryColorMatch = (fallback: string): mapboxgl.Expression => {
+    const expression: (string | mapboxgl.Expression)[] = ["match", ["get", "slug"]];
+    Object.entries(entryMetaBySlug ?? {}).forEach(([slug, meta]) => {
+      const color = (meta?.color || "").trim();
+      if (!color) return;
+      expression.push(slug, color);
+    });
+    expression.push(fallback);
+    return expression as mapboxgl.Expression;
+  };
+
+  const getColoredSlugs = () => Object.keys(entryMetaBySlug ?? {});
+
   const createPinPopup = (meta: EntryMapMeta | undefined, fallbackUrl?: string) => {
     const moods = (meta?.moods ?? []).filter(Boolean).slice(0, 3);
     const color = meta?.color || "#FFD700";
@@ -417,6 +454,65 @@ function AtlasMap({
 
     return wrap;
   };
+
+  const buildEmotionFieldGeoJSON = () => ({
+    type: "FeatureCollection" as const,
+    features: (() => {
+      const fromPhotoPoints = photoPoints.map((point) => {
+        const fallback = HOOD_CENTER_COORDS[point.neighborhoodSlug];
+        const lat = point.lat ?? fallback?.lat ?? null;
+        const lng = point.lng ?? fallback?.lng ?? null;
+        if (lat === null || lng === null) return null;
+        const color = entryMetaBySlug?.[point.neighborhoodSlug]?.color || "#D8B26D";
+        return {
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [lng, lat] },
+          properties: {
+            color,
+            weight: 1.2,
+            radiusBoost: 1.15,
+            blur: 0.84,
+          },
+        };
+      }).filter((feature): feature is NonNullable<typeof feature> => Boolean(feature));
+
+      if (fromPhotoPoints.length > 0) return fromPhotoPoints;
+
+      const fromRepresentative = representativePhotos.map((point) => {
+        const color = entryMetaBySlug?.[point.hoodId]?.color || "#D8B26D";
+        return {
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [point.lng, point.lat] },
+          properties: {
+            color,
+            weight: 1.1,
+            radiusBoost: 1.1,
+            blur: 0.86,
+          },
+        };
+      });
+      if (fromRepresentative.length > 0) return fromRepresentative;
+
+      // Debug fallback: if data is sparse, still render a visible emotional scaffold.
+      return litIds
+        .map((slug) => {
+          const center = HOOD_CENTER_COORDS[slug];
+          if (!center) return null;
+          const color = entryMetaBySlug?.[slug]?.color || "#D8B26D";
+          return {
+            type: "Feature" as const,
+            geometry: { type: "Point" as const, coordinates: [center.lng, center.lat] },
+            properties: {
+              color,
+              weight: 1.05,
+              radiusBoost: 1,
+              blur: 0.9,
+            },
+          };
+        })
+        .filter((feature): feature is NonNullable<typeof feature> => Boolean(feature));
+    })(),
+  });
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current || !mapToken) return;
@@ -597,8 +693,55 @@ function AtlasMap({
         type: "fill",
         source: "hoods",
         paint: {
-          "fill-color": "rgba(125, 77, 255, 0.18)",
-          "fill-opacity": 0,
+          "fill-color": buildEntryColorMatch("rgba(125, 77, 255, 0.12)"),
+          "fill-opacity": [
+            "case",
+            ["in", ["get", "slug"], ["literal", getColoredSlugs()]],
+            [
+              "interpolate", ["linear"], ["zoom"],
+              10.6, 0.64,
+              13.2, 0.54,
+              16, 0.44,
+            ],
+            0,
+          ],
+        },
+      });
+
+      map.addSource("emotion-points", {
+        type: "geojson",
+        data: buildEmotionFieldGeoJSON(),
+      });
+
+      map.addLayer({
+        id: "emotion-field",
+        type: "circle",
+        source: "emotion-points",
+        paint: {
+          "circle-color": ["coalesce", ["get", "color"], "#D8B26D"],
+          "circle-radius": [
+            "*",
+            1.65,
+            ["coalesce", ["get", "radiusBoost"], 1],
+            [
+              "interpolate", ["linear"], ["zoom"],
+              10.6, 28,
+              13.2, 44,
+              16, 70,
+            ],
+          ],
+          "circle-blur": ["coalesce", ["get", "blur"], 0.86],
+          "circle-opacity": [
+            "*",
+            1.9,
+            ["coalesce", ["get", "weight"], 1],
+            [
+              "interpolate", ["linear"], ["zoom"],
+              10.6, 0.16,
+              12.4, 0.24,
+              16, 0.34,
+            ],
+          ],
         },
       });
 
@@ -624,19 +767,19 @@ function AtlasMap({
         type: "line",
         source: "hoods",
         paint: {
-          "line-color": [
-            "case",
-            ["in", ["get", "slug"], ["literal", litIds]],
-            "rgba(254, 222, 139, 0.95)",
-            "rgba(196, 144, 245, 0.58)",
-          ],
+          "line-color": buildEntryColorMatch("rgba(196, 144, 245, 0.58)"),
           "line-width": [
             "interpolate", ["linear"], ["zoom"],
-            10.6, 0.9,
-            13.2, 1.5,
-            16, 2.3,
+            10.6, 1.15,
+            13.2, 1.9,
+            16, 2.8,
           ],
-          "line-opacity": 0.95,
+          "line-opacity": [
+            "case",
+            ["in", ["get", "slug"], ["literal", getColoredSlugs()]],
+            0.98,
+            0.62,
+          ],
         },
       });
 
@@ -697,18 +840,57 @@ function AtlasMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    if (map.getLayer("hoods-line-main")) {
-      map.setPaintProperty("hoods-line-main", "line-color", [
+    const emotionSource = map.getSource("emotion-points") as mapboxgl.GeoJSONSource | undefined;
+    if (emotionSource) {
+      emotionSource.setData(buildEmotionFieldGeoJSON());
+    }
+    if (map.getLayer("emotion-field")) {
+      map.setPaintProperty("emotion-field", "circle-radius", [
+        "*",
+        1.65,
+        ["coalesce", ["get", "radiusBoost"], 1],
+        ["interpolate", ["linear"], ["zoom"], 10.6, 28, 13.2, 44, 16, 70],
+      ]);
+      map.setPaintProperty("emotion-field", "circle-opacity", [
+        "*",
+        1.9,
+        ["coalesce", ["get", "weight"], 1],
+        ["interpolate", ["linear"], ["zoom"], 10.6, 0.16, 12.4, 0.24, 16, 0.34],
+      ]);
+      map.setPaintProperty("emotion-field", "circle-blur", ["coalesce", ["get", "blur"], 0.86]);
+    }
+  }, [entryMetaBySlug, litIds, mapReady, photoPoints, representativePhotos]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (map.getLayer("hoods-fill")) {
+      map.setPaintProperty("hoods-fill", "fill-color", buildEntryColorMatch("rgba(125, 77, 255, 0.12)"));
+      map.setPaintProperty("hoods-fill", "fill-opacity", [
         "case",
-        ["in", ["get", "slug"], ["literal", litIds]],
-        "rgba(254, 222, 139, 0.95)",
-        "rgba(196, 144, 245, 0.58)",
+        ["in", ["get", "slug"], ["literal", getColoredSlugs()]],
+        [
+          "interpolate", ["linear"], ["zoom"],
+          10.6, 0.64,
+          13.2, 0.54,
+          16, 0.44,
+        ],
+        0,
+      ]);
+    }
+    if (map.getLayer("hoods-line-main")) {
+      map.setPaintProperty("hoods-line-main", "line-color", buildEntryColorMatch("rgba(196, 144, 245, 0.58)"));
+      map.setPaintProperty("hoods-line-main", "line-opacity", [
+        "case",
+        ["in", ["get", "slug"], ["literal", getColoredSlugs()]],
+        0.98,
+        0.62,
       ]);
     }
     if (map.getLayer("hoods-line-active")) {
       map.setFilter("hoods-line-active", ["==", ["get", "slug"], activeId ?? ""]);
     }
-  }, [activeId, litIds, mapReady]);
+  }, [activeId, entryMetaBySlug, litIds, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -845,7 +1027,9 @@ export default function AtlasPage() {
         const rawNeighborhoodData = (row.neighborhood_data ?? {}) as Record<string, unknown>;
         const meta = (rawNeighborhoodData.__meta ?? undefined) as AtlasData["meta"];
         const neighborhoods = Object.fromEntries(
-          Object.entries(rawNeighborhoodData).filter(([key]) => key !== "__meta"),
+          Object.entries(rawNeighborhoodData)
+            .filter(([key]) => key !== "__meta")
+            .map(([key, value]) => [key, normalizeNeighborhoodMemory(value as NeighborhoodMemory)]),
         ) as Record<string, NeighborhoodMemory>;
         setData({
           id: row.id,
@@ -929,7 +1113,7 @@ export default function AtlasPage() {
           <h2 style={{ fontSize: "2rem", fontWeight: 300, color: "#EDE8F8", marginBottom: "18px" }}>
             Fetching your map…
           </h2>
-          <button onClick={() => navigate("/try")} style={{
+          <button onClick={() => navigate("/upload")} style={{
             background: "none", border: "1px solid rgba(196,174,244,0.35)",
             borderRadius: "100px", padding: "8px 20px", cursor: "pointer",
             fontFamily: "'DM Sans', sans-serif", fontSize: "0.7rem",
@@ -944,6 +1128,7 @@ export default function AtlasPage() {
   const litIds = mappedHoods.map(h => h.id);
   const selectableIds = HOODS.map(h => h.id);
   const totalPhotos = mappedHoods.reduce((sum, h) => sum + (data.neighborhoods[h.id]?.photoUrls?.length ?? 0), 0);
+  const hasDriftMoments = mappedHoods.some((hood) => Boolean(data.neighborhoods[hood.id]?.isDriftEntry));
   const flattenedMoods = mappedHoods.flatMap((hood) => data.neighborhoods[hood.id]?.moods ?? []);
   const topMoods = getTopMoods(flattenedMoods, 2);
   const dominantMood = getDominantMood(flattenedMoods);
@@ -1080,7 +1265,7 @@ export default function AtlasPage() {
           fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem",
           fontStyle: "italic", color: "#ffffff", letterSpacing: "-0.01em", fontWeight: 400,
         }}>CityMood</button>
-        <button onClick={() => navigate("/try")} style={{
+        <button onClick={() => navigate("/upload")} style={{
           fontFamily: "'DM Sans', sans-serif", fontSize: "0.72rem", letterSpacing: "0.08em",
           textTransform: "uppercase", color: "#ffffff",
           background: "transparent", border: "1.5px solid rgba(255,255,255,0.7)",
@@ -1194,6 +1379,17 @@ export default function AtlasPage() {
           }}>
             {mappedHoods.length} neighborhood{mappedHoods.length !== 1 ? "s" : ""} · {totalPhotos} {totalPhotos === 1 ? "memory" : "memories"}
           </p>
+          {hasDriftMoments && (
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.63rem",
+              letterSpacing: "0.05em",
+              color: "rgba(196,174,244,0.52)",
+              marginBottom: "14px",
+            }}>
+              Some memories on this map were captured in drift mode.
+            </p>
+          )}
 
           {/* Divider */}
           <div style={{ height: "0.5px", background: "rgba(155,48,255,0.1)", marginBottom: "20px" }} />
@@ -1354,13 +1550,19 @@ export default function AtlasPage() {
         {/* ── RIGHT MAP PANEL ── */}
         <div style={{ width: "70%", flexShrink: 0, position: "relative", overflow: "hidden", background: "transparent" }}>
           <div style={{ position: "absolute", inset: 0, background: "transparent" }}>
-            <AtlasMap
+            <AtlasStyledMap
               litIds={selectableIds}
+              selectableIds={selectableIds}
               activeId={activeId}
               onSelect={handleHoodSelect}
+              onBackgroundClick={() => setActiveId(null)}
               photoPoints={photoPoints}
               representativePhotos={representativePhotos}
               entryMetaBySlug={entryMetaBySlug}
+              interactiveAreas
+              lockOverviewMinZoom
+              markerStartOffset={0.35}
+              detailPinZoom={13.2}
             />
           </div>
 

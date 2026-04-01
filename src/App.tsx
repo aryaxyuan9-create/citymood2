@@ -6,6 +6,7 @@ import { getNeighborhoodPhotos } from "./lib/photos";
 import { NEIGHBORHOOD_DATA } from "./lib/neighborhoods";
 import NeighborhoodGallery from "./components/NeighborhoodGallery";
 import AtlasStyledMap from "./components/AtlasStyledMap";
+import TestAnalyze from "./components/TestAnalyze";
 
 // ─────────────────────────────────────────────
 //  Types
@@ -825,6 +826,7 @@ export default function App() {
 
   return (
     <>
+      <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 9999 }}><TestAnalyze /></div>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Cormorant+SC:wght@300;400&family=DM+Sans:wght@300;400&family=DM+Serif+Text:ital@0;1&family=Playfair+Display:ital,wght@0,400;1,400&display=swap');
 

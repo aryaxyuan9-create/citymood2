@@ -8,6 +8,11 @@ export type MapPhotoPoint = {
   url: string;
   lat: number | null;
   lng: number | null;
+  moods?: string[];
+  color?: string;
+  source?: "manual" | "ai-assisted";
+  styleHint?: "dreamy" | "cinematic" | "soft" | "vivid" | "muted";
+  moodConfidence?: number;
 };
 
 export type RepresentativePhoto = {
@@ -65,6 +70,9 @@ export default function AtlasStyledMap({
   lockOverviewMinZoom = false,
   markerStartOffset = 0.45,
   detailPinZoom = 13.2,
+  emotionRadiusBoost = 1,
+  emotionOpacityBoost = 1,
+  interactiveAreas = true,
 }: {
   litIds: string[];
   selectableIds?: string[];
@@ -79,6 +87,9 @@ export default function AtlasStyledMap({
   lockOverviewMinZoom?: boolean;
   markerStartOffset?: number;
   detailPinZoom?: number;
+  emotionRadiusBoost?: number;
+  emotionOpacityBoost?: number;
+  interactiveAreas?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -91,6 +102,8 @@ export default function AtlasStyledMap({
   const [mapReady, setMapReady] = useState(false);
   const [zoom, setZoom] = useState(11.6);
   const mapToken = (import.meta.env.NEXT_PUBLIC_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_TOKEN || "").trim();
+  const safeEmotionRadiusBoost = Math.max(0.6, Math.min(2.5, emotionRadiusBoost));
+  const safeEmotionOpacityBoost = Math.max(0.5, Math.min(2, emotionOpacityBoost));
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -202,6 +215,36 @@ export default function AtlasStyledMap({
 
     return wrap;
   };
+
+  const buildEmotionFieldGeoJSON = () => ({
+    type: "FeatureCollection" as const,
+    features: photoPoints
+      .filter((point) => point.lat !== null && point.lng !== null)
+      .map((point) => {
+        const color = point.color || entryMetaBySlug?.[point.neighborhoodSlug]?.color || "#D8B26D";
+        const styleHint = point.styleHint || "soft";
+        const confidence = typeof point.moodConfidence === "number" ? point.moodConfidence : 0.65;
+        let blur = 0.78;
+        let radiusBoost = 1;
+        if (styleHint === "dreamy") { blur = 0.88; radiusBoost = 1.2; }
+        if (styleHint === "cinematic") { blur = 0.74; radiusBoost = 1.1; }
+        if (styleHint === "vivid") { blur = 0.68; radiusBoost = 0.95; }
+        if (styleHint === "muted") { blur = 0.9; radiusBoost = 1.22; }
+        return {
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [point.lng as number, point.lat as number],
+          },
+          properties: {
+            color,
+            weight: Math.max(0.5, Math.min(1.8, 0.7 + confidence)),
+            blur,
+            radiusBoost,
+          },
+        };
+      }),
+  });
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current || !mapToken) return;
@@ -321,6 +364,37 @@ export default function AtlasStyledMap({
         paint: { "fill-opacity": 0 },
       });
 
+      map.addSource("emotion-points", {
+        type: "geojson",
+        data: buildEmotionFieldGeoJSON(),
+      });
+
+      map.addLayer({
+        id: "emotion-field",
+        type: "circle",
+        source: "emotion-points",
+        paint: {
+          "circle-color": ["coalesce", ["get", "color"], "#D8B26D"],
+          "circle-radius": [
+            "*",
+            safeEmotionRadiusBoost,
+            ["coalesce", ["get", "radiusBoost"], 1],
+            ["interpolate", ["linear"], ["zoom"], 10.6, 22, 13.2, 34, 16, 56],
+          ],
+          "circle-blur": ["coalesce", ["get", "blur"], 0.8],
+          "circle-opacity": [
+            "*",
+            safeEmotionOpacityBoost,
+            [
+              "interpolate", ["linear"], ["zoom"],
+              10.6, 0.1,
+              12.4, 0.18,
+              16, 0.26,
+            ],
+          ],
+        },
+      });
+
       map.addLayer({
         id: "hoods-line-glow",
         type: "line",
@@ -381,12 +455,20 @@ export default function AtlasStyledMap({
       });
 
       map.on("click", (e) => {
+        if (!interactiveAreas) {
+          onBackgroundClickRef.current?.();
+          return;
+        }
         const features = map.queryRenderedFeatures(e.point, { layers: ["hoods-hit"] });
         const slug = features[0]?.properties?.slug as string | undefined;
         if (slug && selectableIdsRef.current.includes(slug)) onSelectRef.current(slug);
         else onBackgroundClickRef.current?.();
       });
       map.on("mousemove", "hoods-hit", (e) => {
+        if (!interactiveAreas) {
+          map.getCanvas().style.cursor = "";
+          return;
+        }
         const slug = e.features?.[0]?.properties?.slug as string | undefined;
         map.getCanvas().style.cursor = slug && selectableIdsRef.current.includes(slug) ? "pointer" : "";
       });
@@ -404,7 +486,34 @@ export default function AtlasStyledMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [lockOverviewMinZoom, mapToken]);
+  }, [interactiveAreas, lockOverviewMinZoom, mapToken, safeEmotionOpacityBoost, safeEmotionRadiusBoost]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const emotionSource = map.getSource("emotion-points") as mapboxgl.GeoJSONSource | undefined;
+    if (emotionSource) {
+      emotionSource.setData(buildEmotionFieldGeoJSON());
+    }
+    if (map.getLayer("emotion-field")) {
+      map.setPaintProperty("emotion-field", "circle-radius", [
+        "*",
+        safeEmotionRadiusBoost,
+        ["coalesce", ["get", "radiusBoost"], 1],
+        ["interpolate", ["linear"], ["zoom"], 10.6, 22, 13.2, 34, 16, 56],
+      ]);
+      map.setPaintProperty("emotion-field", "circle-opacity", [
+        "*",
+        safeEmotionOpacityBoost,
+        [
+          "interpolate", ["linear"], ["zoom"],
+          10.6, 0.1,
+          12.4, 0.18,
+          16, 0.26,
+        ],
+      ]);
+    }
+  }, [entryMetaBySlug, mapReady, photoPoints, safeEmotionOpacityBoost, safeEmotionRadiusBoost]);
 
   useEffect(() => {
     const map = mapRef.current;

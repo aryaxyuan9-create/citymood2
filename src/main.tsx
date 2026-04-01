@@ -47,7 +47,10 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
-        <Route path="/try" element={<TryPage />} />
+        <Route path="/try" element={<Navigate to="/upload" replace />} />
+        <Route path="/upload" element={<TryPage />} />
+        <Route path="/generate" element={<TryPage />} />
+        <Route path="/edit" element={<TryPage />} />
         <Route path="/atlas" element={<Navigate to="/try" replace />} />
         <Route path="/atlas/:id" element={<AtlasPage />} />
         <Route path="/atlases" element={<Navigate to="/try" replace />} />

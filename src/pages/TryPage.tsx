@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import * as exifr from "exifr";
 import ShaderBackground from "../components/home/ShaderBackground";
 import { supabase } from "../lib/supabase";
@@ -119,6 +119,13 @@ type PhotoMemory = {
   capturedAt: string | null;
   lat: number | null;
   lng: number | null;
+  assignedSlug: Slug;
+  moods: string[];
+  color: string;
+  source: "manual" | "ai-assisted";
+  aiSuggestedMoods?: string[];
+  styleHint?: "dreamy" | "cinematic" | "soft" | "vivid" | "muted";
+  moodConfidence?: number;
   locationSource: PhotoLocationSource;
   manualOverride: boolean;
   manualPlaceName: string;
@@ -128,6 +135,9 @@ type NeighborhoodEntry = {
   photos: PhotoMemory[];
   moods: string[];
   color: string;
+  isDriftEntry?: boolean;
+  driftPrompt?: string;
+  capturedMoodFirst?: boolean;
 };
 
 type MemoryStore = Record<string, NeighborhoodEntry>;
@@ -151,6 +161,8 @@ type AtlasIdentityCopy = {
 type AtlasMeta = {
   creatorName: string;
   customSubtitle?: string;
+  cityName?: string;
+  optionalMemory?: string;
   identity?: AtlasIdentityCopy;
 };
 
@@ -167,6 +179,17 @@ const MOOD_PRESETS = [
   "Bold",
 ];
 
+const DRIFT_PROMPTS = [
+  "Follow a mood, not a destination.",
+  "Notice a place you would normally pass by.",
+  "Walk toward somewhere quieter.",
+  "Find a place that feels unfamiliar.",
+  "Pay attention to what changes your pace.",
+  "Let the street decide for a while.",
+  "Turn where your attention lingers.",
+  "Stay with a block that feels different today.",
+];
+
 const MOOD_COLOR_MAP: Record<string, string> = {
   calm: "#7FA8FF",
   warm: "#F2A356",
@@ -177,6 +200,13 @@ const MOOD_COLOR_MAP: Record<string, string> = {
   melancholic: "#6C78A7",
   bold: "#FF8A5B",
 };
+
+function routeToFlowStep(pathname: string): "entry" | "upload" | "locate" | "generating" | "customize" {
+  if (pathname === "/upload") return "upload";
+  if (pathname === "/generate") return "generating";
+  if (pathname === "/edit") return "customize";
+  return "entry";
+}
 
 function suggestColorFromMood(mood: string | undefined): string {
   if (!mood) return DEFAULT_ENTRY_COLOR;
@@ -285,13 +315,32 @@ function loadDraft(): MemoryStore {
           typeof value === "object" &&
           Array.isArray((value as { photos?: unknown[] }).photos)
         ) {
-          const next = value as { photos: PhotoMemory[]; moods?: string[]; color?: string };
+          const next = value as {
+            photos: PhotoMemory[];
+            moods?: string[];
+            color?: string;
+            isDriftEntry?: boolean;
+            driftPrompt?: string;
+            capturedMoodFirst?: boolean;
+          };
           return [
             slug,
             {
-              photos: next.photos,
+              photos: next.photos.map((photo) => ({
+                ...photo,
+                assignedSlug: (photo.assignedSlug as Slug | undefined) ?? (slug as Slug),
+                moods: normalizeMoods(Array.isArray(photo.moods) ? photo.moods : []),
+                color: typeof photo.color === "string" && photo.color ? photo.color : DEFAULT_ENTRY_COLOR,
+                source: photo.source === "ai-assisted" ? "ai-assisted" : "manual",
+                aiSuggestedMoods: Array.isArray(photo.aiSuggestedMoods) ? normalizeMoods(photo.aiSuggestedMoods) : [],
+                styleHint: photo.styleHint ?? "soft",
+                moodConfidence: typeof photo.moodConfidence === "number" ? photo.moodConfidence : undefined,
+              })),
               moods: normalizeMoods(Array.isArray(next.moods) ? next.moods : []),
               color: typeof next.color === "string" && next.color ? next.color : DEFAULT_ENTRY_COLOR,
+              isDriftEntry: Boolean(next.isDriftEntry),
+              driftPrompt: typeof next.driftPrompt === "string" ? next.driftPrompt : undefined,
+              capturedMoodFirst: Boolean(next.capturedMoodFirst),
             },
           ];
         }
@@ -302,6 +351,11 @@ function loadDraft(): MemoryStore {
           Array.isArray((value as { notes?: string[] }).notes)
         ) {
           const legacy = value as { photoUrls: string[]; notes: string[] };
+          const legacyMoods = normalizeMoods(Array.isArray((value as { moods?: string[] }).moods) ? (value as { moods?: string[] }).moods ?? [] : []);
+          const legacyColor =
+            typeof (value as { color?: string }).color === "string" && (value as { color?: string }).color
+              ? (value as { color?: string }).color as string
+              : suggestColorFromMood(legacyMoods[0]);
           return [
             slug,
             {
@@ -311,10 +365,22 @@ function loadDraft(): MemoryStore {
                 capturedAt: null,
                 lat: null,
                 lng: null,
+                assignedSlug: slug as Slug,
+                moods: [],
+                color: DEFAULT_ENTRY_COLOR,
+                source: "manual" as const,
+                aiSuggestedMoods: [],
+                styleHint: "soft" as const,
+                moodConfidence: undefined,
                 locationSource: "none" as PhotoLocationSource,
                 manualOverride: false,
                 manualPlaceName: "",
               })),
+              moods: legacyMoods,
+              color: legacyColor || DEFAULT_ENTRY_COLOR,
+              isDriftEntry: false,
+              driftPrompt: undefined,
+              capturedMoodFirst: false,
             },
           ];
         }
@@ -338,6 +404,81 @@ function localInputToIso(input: string): string | null {
   if (!input) return null;
   const date = new Date(input);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function distance2(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const dLat = aLat - bLat;
+  const dLng = aLng - bLng;
+  return dLat * dLat + dLng * dLng;
+}
+
+function nearestSlugFromLatLng(lat: number | null, lng: number | null): Slug | null {
+  if (lat === null || lng === null) return null;
+  let best: Slug | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  (Object.entries(HOOD_CENTER_COORDS) as Array<[Slug, { lat: number; lng: number }]>).forEach(([slug, center]) => {
+    const d = distance2(lat, lng, center.lat, center.lng);
+    if (d < bestD) {
+      bestD = d;
+      best = slug;
+    }
+  });
+  return best;
+}
+
+function suggestMoodsHeuristic(input: string): { moods: string[]; confidence: number; styleHint?: PhotoMemory["styleHint"] } {
+  const text = input.toLowerCase();
+  const moodPool: Array<{ mood: string; keys: string[] }> = [
+    { mood: "Calm", keys: ["quiet", "still", "soft", "calm", "park", "river", "morning"] },
+    { mood: "Warm", keys: ["sun", "golden", "warm", "amber", "sunset"] },
+    { mood: "Nostalgic", keys: ["old", "memory", "nostalgia", "film", "vintage"] },
+    { mood: "Electric", keys: ["night", "neon", "busy", "crowd", "city", "times square"] },
+    { mood: "Romantic", keys: ["date", "love", "intimate", "kiss", "candle"] },
+    { mood: "Dreamy", keys: ["dream", "fog", "mist", "blue", "float"] },
+    { mood: "Melancholic", keys: ["rain", "alone", "lonely", "gray", "empty"] },
+    { mood: "Bold", keys: ["red", "loud", "strong", "contrast", "dramatic"] },
+  ];
+
+  const scored = moodPool
+    .map((item) => ({
+      mood: item.mood,
+      score: item.keys.reduce((sum, key) => sum + (text.includes(key) ? 1 : 0), 0),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const top = scored.filter((s) => s.score > 0).slice(0, 3).map((s) => s.mood);
+  const fallback = ["Calm", "Nostalgic", "Dreamy"];
+  const moods = (top.length > 0 ? top : fallback).slice(0, 3);
+  const maxScore = scored[0]?.score ?? 0;
+  const confidence = Math.max(0.45, Math.min(0.92, 0.46 + maxScore * 0.12));
+  const styleHint: PhotoMemory["styleHint"] =
+    text.includes("film") || text.includes("cinematic")
+      ? "cinematic"
+      : text.includes("vivid") || text.includes("neon")
+      ? "vivid"
+      : text.includes("muted") || text.includes("fog")
+      ? "muted"
+      : text.includes("soft")
+      ? "soft"
+      : "dreamy";
+
+  return { moods, confidence, styleHint };
+}
+
+function deriveEntryMoodAndColor(photos: PhotoMemory[]): { moods: string[]; color: string } {
+  const mergedMoods = normalizeMoods(photos.flatMap((photo) => photo.moods ?? []));
+  const colors = photos.map((photo) => photo.color).filter(Boolean);
+  const color = mostFrequent(colors, suggestColorFromMood(mergedMoods[0]));
+  return {
+    moods: mergedMoods.slice(0, MAX_MOODS),
+    color,
+  };
+}
+
+function buildEmotionPhrase(moods: string[]): string {
+  const top = normalizeMoods(moods).slice(0, 3);
+  if (top.length === 0) return "quiet, cinematic, slightly distant";
+  return top.map((m) => m.toLowerCase()).join(", ");
 }
 
 // ─────────────────────────────────────────────
@@ -566,11 +707,15 @@ const NAV_H = 52;
 
 export default function TryPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const DEFAULT_UPLOAD_SLUG: Slug = "midtown";
+  type FlowStep = "entry" | "upload" | "locate" | "generating" | "customize";
 
   // ── State (per spec) ──
   const [atlasId]                           = useState<string>(() => crypto.randomUUID());
   const [memories, setMemories]             = useState<MemoryStore>(loadDraft);
   const [selectedSlug, setSelectedSlug]     = useState<string | null>(null);
+  const [flowStep, setFlowStep]             = useState<FlowStep>("entry");
   const [showPanel, setShowPanel]           = useState(false);
   const [showUpload, setShowUpload]         = useState(false);
 
@@ -578,15 +723,28 @@ export default function TryPage() {
   const [currentItems, setCurrentItems]     = useState<PhotoMemory[]>([]);
   const [currentMoods, setCurrentMoods]     = useState<string[]>([]);
   const [currentColor, setCurrentColor]     = useState<string>(DEFAULT_ENTRY_COLOR);
+  const [cityName, setCityName]             = useState("New York City");
+  const [optionalMemory, setOptionalMemory] = useState("");
   const [moodInput, setMoodInput]           = useState("");
   const [dragOver, setDragOver]             = useState(false);
   const [uploading, setUploading]           = useState(false);
+  const [aiSuggestingIndex, setAiSuggestingIndex] = useState<number | null>(null);
   const [finishing, setFinishing]           = useState(false);
   const [uploadError, setUploadError]       = useState<string | null>(null);
   const [pinPickerIndex, setPinPickerIndex] = useState<number | null>(null);
   const [showIdentityStep, setShowIdentityStep] = useState(false);
   const [creatorName, setCreatorName] = useState("");
   const [customSubtitle, setCustomSubtitle] = useState("");
+  const [driftMode, setDriftMode] = useState(false);
+  const [activeDriftPrompt, setActiveDriftPrompt] = useState<string | null>(null);
+  const [stylePreset, setStylePreset] = useState<"soft" | "cinematic" | "warm" | "dreamlike" | "cool">("soft");
+  const [emotionIntensity, setEmotionIntensity] = useState<"low" | "medium" | "high">("medium");
+  const [areaDefaultMoodsBySlug, setAreaDefaultMoodsBySlug] = useState<Record<string, string[]>>({});
+  const [selectedLocateItems, setSelectedLocateItems] = useState<number[]>([]);
+  const [showPhotoOverrides, setShowPhotoOverrides] = useState(false);
+  const [generationStep, setGenerationStep] = useState(0);
+  const [expandedRegionSlug, setExpandedRegionSlug] = useState<string | null>(null);
+  const [regionEdits, setRegionEdits] = useState<Record<string, { phrase: string; tone: string; memory: string }>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -599,6 +757,9 @@ export default function TryPage() {
           notes: data.photos.map(photo => photo.note),
           moods: data.moods,
           color: data.color,
+          isDriftEntry: data.isDriftEntry,
+          driftPrompt: data.driftPrompt,
+          capturedMoodFirst: data.capturedMoodFirst,
         }])
       );
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(slim));
@@ -619,7 +780,161 @@ export default function TryPage() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [showUpload, showPanel]);
 
+  useEffect(() => {
+    const routeStep = routeToFlowStep(location.pathname);
+    setFlowStep(routeStep);
+
+    if (routeStep === "upload") {
+      setShowUpload(true);
+      setShowPanel(false);
+      if (!selectedSlug) setSelectedSlug(DEFAULT_UPLOAD_SLUG);
+      return;
+    }
+
+    if (routeStep === "generating") {
+      setShowUpload(false);
+      setShowPanel(false);
+      // Generation should only run when we have data to process.
+      if (Object.keys(memories).length > 0 || currentItems.length > 0) triggerGenerateDraft();
+      else navigate("/upload");
+      return;
+    }
+
+    if (routeStep === "customize") {
+      if (Object.keys(memories).length === 0) {
+        navigate("/upload");
+        return;
+      }
+      setShowUpload(false);
+      setShowPanel(false);
+      return;
+    }
+
+    setShowUpload(false);
+    setShowPanel(false);
+    setSelectedSlug(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (flowStep !== "generating") return;
+    const id = window.setInterval(() => {
+      setGenerationStep((prev) => (prev + 1) % 3);
+    }, 700);
+    return () => window.clearInterval(id);
+  }, [flowStep]);
+
+  useEffect(() => {
+    const next = Object.fromEntries(
+      Object.entries(memories).map(([slug, data]) => [
+        slug,
+        {
+          phrase: buildEmotionPhrase(data.moods ?? []),
+          tone: (data.moods?.[0] ?? "Calm"),
+          memory: data.photos[0]?.note ?? "",
+        },
+      ]),
+    ) as Record<string, { phrase: string; tone: string; memory: string }>;
+    setRegionEdits((prev) => ({ ...next, ...prev }));
+  }, [memories]);
+
   // ── Helpers ──
+  const startMapFlow = () => {
+    setFlowStep("upload");
+    setShowUpload(true);
+    setShowPanel(false);
+    setSelectedSlug(DEFAULT_UPLOAD_SLUG);
+    if (location.pathname !== "/upload") navigate("/upload");
+  };
+
+  const goToGenerateStep = () => {
+    setFlowStep("generating");
+    if (!showUpload) setShowUpload(true);
+    if (!selectedSlug) setSelectedSlug(DEFAULT_UPLOAD_SLUG);
+    if (location.pathname !== "/generate") navigate("/generate");
+  };
+
+  const mergeCurrentItemsIntoMemories = (base: MemoryStore): MemoryStore => {
+    if (currentItems.length === 0) return base;
+    const bucketed = new Map<string, PhotoMemory[]>();
+    currentItems.forEach((photo) => {
+      const target = (photo.assignedSlug || selectedSlug || DEFAULT_UPLOAD_SLUG) as string;
+      const arr = bucketed.get(target) ?? [];
+      arr.push(photo);
+      bucketed.set(target, arr);
+    });
+    const updated: MemoryStore = { ...base };
+    bucketed.forEach((photos, slug) => {
+      const existing = updated[slug];
+      const mergedPhotos = [...(existing?.photos ?? []), ...photos];
+      const aggregate = deriveEntryMoodAndColor(mergedPhotos);
+      updated[slug] = {
+        photos: mergedPhotos,
+        moods: aggregate.moods,
+        color: aggregate.color || suggestColorFromMood(aggregate.moods[0]),
+        isDriftEntry: driftMode || existing?.isDriftEntry,
+        driftPrompt: driftMode ? (activeDriftPrompt || existing?.driftPrompt) : existing?.driftPrompt,
+        capturedMoodFirst: driftMode
+          ? mergedPhotos.some((photo) => (photo.moods?.length ?? 0) > 0)
+          : existing?.capturedMoodFirst,
+      };
+    });
+    return updated;
+  };
+
+  const triggerGenerateDraft = () => {
+    const mergedMemories = mergeCurrentItemsIntoMemories(memories);
+    const totalPhotos = Object.values(mergedMemories).reduce((sum, entry) => sum + (entry.photos?.length ?? 0), 0);
+    if (Object.keys(mergedMemories).length === 0 || totalPhotos === 0) {
+      setUploadError("Please upload at least one memory before generating your map.");
+      return;
+    }
+    setMemories(mergedMemories);
+    setCurrentItems([]);
+    setSelectedLocateItems([]);
+    setFlowStep("generating");
+    setUploadError(null);
+    const withAISuggestions: MemoryStore = Object.fromEntries(
+      Object.entries(mergedMemories).map(([slug, entry]) => [
+        slug,
+        {
+          ...entry,
+          photos: entry.photos.map((photo) => {
+            if ((photo.moods?.length ?? 0) > 0) return photo;
+            const signal = `${photo.note} ${photo.manualPlaceName}`.trim();
+            const result = suggestMoodsHeuristic(signal);
+            return {
+              ...photo,
+              moods: normalizeMoods(result.moods),
+              aiSuggestedMoods: normalizeMoods(result.moods),
+              moodConfidence: result.confidence,
+              styleHint: photo.styleHint ?? result.styleHint,
+              source: "ai-assisted" as const,
+              color: suggestColorFromMood(result.moods[0]),
+            };
+          }),
+        },
+      ]),
+    );
+    const draftAreaDefaults: Record<string, string[]> = Object.fromEntries(
+      Object.entries(withAISuggestions).map(([slug, entry]) => {
+        const moods = normalizeMoods(entry.photos.flatMap((photo) => photo.moods ?? []));
+        return [slug, moods.length > 0 ? moods : normalizeMoods(entry.moods ?? [])];
+      }),
+    );
+    window.setTimeout(() => {
+      setMemories(withAISuggestions);
+      setAreaDefaultMoodsBySlug(draftAreaDefaults);
+      setFlowStep("customize");
+      setShowUpload(false);
+      setShowPanel(false);
+      setSelectedSlug(null);
+      if (location.pathname === "/generate") {
+        navigate("/edit");
+      }
+    }, 2200);
+  };
+
   const uploadFile = async (file: File, slug: string): Promise<string> => {
     const ext = file.name.split('.').pop() ?? 'jpg';
     const path = `${atlasId}/${slug}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
@@ -672,12 +987,20 @@ export default function TryPage() {
     Promise.all(
       files.map(async (file) => {
         const [url, exifData] = await Promise.all([uploadFile(file, slug), parseExifMetadata(file)]);
+        const autoSlug = nearestSlugFromLatLng(exifData.lat, exifData.lng) ?? slug;
         return {
           url,
           note: "",
           capturedAt: exifData.capturedAt,
           lat: exifData.lat,
           lng: exifData.lng,
+          assignedSlug: autoSlug,
+          moods: [],
+          color: DEFAULT_ENTRY_COLOR,
+          source: "manual",
+          aiSuggestedMoods: [],
+          styleHint: "soft",
+          moodConfidence: undefined,
           locationSource: exifData.locationSource,
           manualOverride: false,
           manualPlaceName: "",
@@ -687,11 +1010,11 @@ export default function TryPage() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (!files.length || !selectedSlug) return;
+    if (!files.length) return;
     setUploading(true);
     setUploadError(null);
     try {
-      const uploaded = await uploadFilesForSlug(files, selectedSlug);
+      const uploaded = await uploadFilesForSlug(files, selectedSlug ?? DEFAULT_UPLOAD_SLUG);
       setCurrentItems(prev => [...prev, ...uploaded]);
     } catch {
       setUploadError("Upload failed — check your connection and try again.");
@@ -705,11 +1028,11 @@ export default function TryPage() {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/"));
-    if (!files.length || !selectedSlug) return;
+    if (!files.length) return;
     setUploading(true);
     setUploadError(null);
     try {
-      const uploaded = await uploadFilesForSlug(files, selectedSlug);
+      const uploaded = await uploadFilesForSlug(files, selectedSlug ?? DEFAULT_UPLOAD_SLUG);
       setCurrentItems(prev => [...prev, ...uploaded]);
     } catch {
       setUploadError("Upload failed — check your connection and try again.");
@@ -725,6 +1048,29 @@ export default function TryPage() {
 
   const updateItem = (i: number, updater: (photo: PhotoMemory) => PhotoMemory) => {
     setCurrentItems(prev => prev.map((photo, idx) => (idx === i ? updater(photo) : photo)));
+  };
+
+  const setPhotoMoods = (i: number, nextMoods: string[], source: PhotoMemory["source"] = "manual") => {
+    const normalized = normalizeMoods(nextMoods);
+    updateItem(i, (photo) => ({
+      ...photo,
+      moods: normalized,
+      color: photo.color || suggestColorFromMood(normalized[0]),
+      source,
+    }));
+  };
+
+  const setPhotoAssignedSlug = (i: number, slug: Slug) => {
+    const center = HOOD_CENTER_COORDS[slug];
+    updateItem(i, (photo) => ({
+      ...photo,
+      assignedSlug: slug,
+      lat: center?.lat ?? photo.lat,
+      lng: center?.lng ?? photo.lng,
+      manualPlaceName: getNeighborhoodName(slug),
+      manualOverride: true,
+      locationSource: "manual",
+    }));
   };
 
   const updateNote = (i: number, val: string) => {
@@ -759,68 +1105,110 @@ export default function TryPage() {
     }));
   };
 
-  const applyNeighborhoodPreset = (i: number, slug: Slug) => {
-    const center = HOOD_CENTER_COORDS[slug];
-    const hood = HOODS.find(h => h.slug === slug);
-    if (!center || !hood) return;
-    updateItem(i, photo => ({
-      ...photo,
-      lat: center.lat,
-      lng: center.lng,
-      manualPlaceName: hood.name,
-      manualOverride: true,
-      locationSource: "manual",
-    }));
+  const suggestPhotoMoodsWithAI = async (i: number) => {
+    const photo = currentItems[i];
+    if (!photo) return;
+    setAiSuggestingIndex(i);
+    try {
+      const signal = `${photo.note} ${photo.manualPlaceName}`.trim();
+      const result = suggestMoodsHeuristic(signal);
+      setCurrentItems((prev) =>
+        prev.map((item, idx) =>
+          idx === i
+            ? {
+                ...item,
+                moods: normalizeMoods(result.moods),
+                color: suggestColorFromMood(result.moods[0]),
+                source: "ai-assisted",
+                aiSuggestedMoods: result.moods,
+                styleHint: result.styleHint,
+                moodConfidence: result.confidence,
+              }
+            : item,
+        ),
+      );
+    } finally {
+      setAiSuggestingIndex(null);
+    }
   };
 
   const handleSaveAndAddAnother = () => {
-    if (!selectedSlug) return;
-    const normalizedMoods = normalizeMoods(currentMoods);
-    const updated: MemoryStore = {
-      ...memories,
-      [selectedSlug]: {
-        photos: [...(memories[selectedSlug]?.photos ?? []), ...currentItems],
-        moods: normalizedMoods,
-        color: currentColor || suggestColorFromMood(normalizedMoods[0]),
-      },
-    };
+    if (flowStep !== "customize") return;
+    if (currentItems.length === 0) {
+      setUploadError("Please upload at least one photo first.");
+      return;
+    }
+    const updated = mergeCurrentItemsIntoMemories(memories);
     setMemories(updated);
     setCurrentItems([]);
+    setSelectedLocateItems([]);
     setCurrentMoods([]);
     setCurrentColor(DEFAULT_ENTRY_COLOR);
     setMoodInput("");
-    setShowUpload(false);
+    setFlowStep("upload");
+    setShowUpload(true);
     setShowPanel(false);
-    setSelectedSlug(null);
+    setSelectedSlug(DEFAULT_UPLOAD_SLUG);
     setPinPickerIndex(null);
   };
 
   const handleFinish = async () => {
     if (finishing) return;
-    if (!creatorName.trim()) {
-      setUploadError("Please add your name before generating your map.");
-      return;
-    }
     setFinishing(true);
     setUploadError(null);
     try {
       const identityStats = computeIdentityStats(memories);
-      const identity = generateIdentityCopy(creatorName, customSubtitle, identityStats);
+      const safeCreatorName = creatorName.trim() || "Your";
+      const identity = generateIdentityCopy(safeCreatorName, customSubtitle, identityStats);
 
       // Build neighborhood_data: { [slug]: { notes, photoUrls } }
       const neighborhoodEntries = Object.fromEntries(
-        Object.entries(memories).map(([slug, data]) => [slug, {
-          notes: data.photos.map(photo => photo.note),
+        Object.entries(memories).map(([slug, data]) => {
+          const edit = regionEdits[slug];
+          const editedMoods = normalizeMoods([
+            ...(areaDefaultMoodsBySlug[slug] ?? data.photos.flatMap((photo) => photo.moods)),
+            ...(edit?.tone ? [edit.tone] : []),
+          ]);
+          const notes = [
+            ...data.photos.map((photo) => photo.note).filter(Boolean),
+            ...(edit?.memory ? [edit.memory] : []),
+            ...(edit?.phrase ? [edit.phrase] : []),
+          ];
+          return [slug, {
+          notes,
           photoUrls: data.photos.map(photo => photo.url),
-          moods: normalizeMoods(data.moods),
-          color: data.color || suggestColorFromMood(data.moods[0]),
-        }])
+          moods: editedMoods,
+          color: suggestColorFromMood(editedMoods[0]),
+          areaDefaultMoods: normalizeMoods(areaDefaultMoodsBySlug[slug] ?? []),
+          memories: data.photos.map((photo) => ({
+            url: photo.url,
+            note: photo.note,
+            capturedAt: photo.capturedAt,
+            lat: photo.lat,
+            lng: photo.lng,
+            assignedSlug: photo.assignedSlug,
+            moods: normalizeMoods(photo.moods),
+            color: suggestColorFromMood((photo.moods?.[0]) || (areaDefaultMoodsBySlug[slug]?.[0] ?? "")),
+            source: photo.source,
+            aiSuggestedMoods: normalizeMoods(photo.aiSuggestedMoods ?? []),
+            styleHint: photo.styleHint,
+            moodConfidence: photo.moodConfidence,
+            manualPlaceName: photo.manualPlaceName || "",
+            locationSource: photo.locationSource,
+          })),
+          isDriftEntry: Boolean(data.isDriftEntry),
+          driftPrompt: data.driftPrompt,
+          capturedMoodFirst: Boolean(data.capturedMoodFirst),
+        }];
+        })
       );
       const neighborhoodData = {
         ...neighborhoodEntries,
         __meta: {
-          creatorName: creatorName.trim(),
+          creatorName: safeCreatorName,
           customSubtitle: customSubtitle.trim() || undefined,
+          cityName: cityName.trim() || undefined,
+          optionalMemory: optionalMemory.trim() || undefined,
           identity,
         } as AtlasMeta,
       };
@@ -835,7 +1223,7 @@ export default function TryPage() {
       const photoRows = Object.entries(memories).flatMap(([slug, data]) =>
         data.photos.map(photo => ({
           atlas_id: atlasId,
-          neighborhood_slug: slug,
+          neighborhood_slug: photo.assignedSlug || slug,
           storage_url: photo.url,
           captured_at: photo.capturedAt,
           lat: photo.lat,
@@ -872,22 +1260,7 @@ export default function TryPage() {
   };
 
   // Map block click
-  const handleBlockClick = (slug: string) => {
-    if (memories[slug]) {
-      // Lit block → open upload directly
-      reopenUpload(slug);
-    } else {
-      // Unlit block → show panel first
-      setSelectedSlug(slug);
-      setCurrentItems([]);
-      setCurrentMoods(memories[slug]?.moods ?? []);
-      setCurrentColor(memories[slug]?.color ?? DEFAULT_ENTRY_COLOR);
-      setMoodInput("");
-      setShowPanel(true);
-      setShowUpload(false);
-      setPinPickerIndex(null);
-    }
-  };
+  const handleBlockClick = () => {};
 
   const handleMapBackgroundClick = () => {
     if (!showUpload) {
@@ -897,20 +1270,65 @@ export default function TryPage() {
   };
 
   const requestFinish = () => {
+    if (flowStep === "upload") {
+      navigate("/generate");
+      return;
+    }
+    if (flowStep === "locate") {
+      triggerGenerateDraft();
+      return;
+    }
+    if (flowStep === "generating") return;
     setUploadError(null);
     setShowIdentityStep(true);
+  };
+
+  const handleUploadBack = () => {
+    if (flowStep === "locate") {
+      setFlowStep("upload");
+      return;
+    }
+    if (flowStep === "customize") {
+      navigate("/upload");
+      return;
+    }
+    if (flowStep === "upload") {
+      navigate("/");
+      return;
+    }
+    setShowUpload(false);
+    setFlowStep("entry");
+    setShowPanel(false);
+    setSelectedSlug(null);
+  };
+
+  const startDriftMode = () => {
+    const prompt = DRIFT_PROMPTS[Math.floor(Math.random() * DRIFT_PROMPTS.length)];
+    setDriftMode(true);
+    setActiveDriftPrompt(prompt);
   };
 
   const litSlugs = Object.keys(memories);
   const selectableSlugs = HOODS.map((h) => h.slug);
   const mappedCount = litSlugs.length;
+  const effectiveMoodsForPhoto = (slug: string, photo: PhotoMemory): string[] => {
+    if ((photo.moods?.length ?? 0) > 0) return photo.moods;
+    const areaDefault = areaDefaultMoodsBySlug[slug] ?? [];
+    if (areaDefault.length > 0) return areaDefault;
+    return [];
+  };
   const mapPhotoPoints: MapPhotoPoint[] = Object.entries(memories).flatMap(([slug, data]) =>
     data.photos.map((photo, i) => ({
       id: `try-${slug}-${i}`,
-      neighborhoodSlug: slug,
+      neighborhoodSlug: photo.assignedSlug || slug,
       url: photo.url,
       lat: photo.lat,
       lng: photo.lng,
+      moods: effectiveMoodsForPhoto(slug, photo),
+      color: suggestColorFromMood(effectiveMoodsForPhoto(slug, photo)[0]),
+      source: photo.source,
+      styleHint: photo.styleHint,
+      moodConfidence: photo.moodConfidence,
     })),
   );
   const representativePhotos: RepresentativePhoto[] = Object.entries(memories)
@@ -925,12 +1343,234 @@ export default function TryPage() {
     Object.entries(memories).map(([slug, data]) => [
       slug,
       {
-        moods: data.moods,
-        color: data.color,
+        moods: normalizeMoods(areaDefaultMoodsBySlug[slug] ?? data.moods ?? []),
+        color: suggestColorFromMood((areaDefaultMoodsBySlug[slug] ?? data.moods ?? [])[0]),
         previewUrl: data.photos[0]?.url,
       },
     ]),
   );
+  const styleFactors = (() => {
+    const base = {
+      soft: { radius: 1, opacity: 1 },
+      cinematic: { radius: 0.95, opacity: 1.15 },
+      warm: { radius: 1.08, opacity: 1.08 },
+      dreamlike: { radius: 1.2, opacity: 0.96 },
+      cool: { radius: 0.9, opacity: 0.9 },
+    }[stylePreset];
+    const intensity = emotionIntensity === "low" ? 0.82 : emotionIntensity === "high" ? 1.28 : 1;
+    return {
+      radiusBoost: base.radius * intensity,
+      opacityBoost: base.opacity * intensity,
+    };
+  })();
+  const routeStep = routeToFlowStep(location.pathname);
+  const generationMessages = [
+    "Reading your memories...",
+    "Finding places and emotional patterns...",
+    "Building your map...",
+  ];
+  const mappedRegions = Object.entries(memories);
+
+  if (routeStep === "generating") {
+    const litCount = Math.max(1, Math.ceil((mappedRegions.length || 1) * ((generationStep + 1) / 3)));
+    const generatingLitIds = mappedRegions.slice(0, litCount).map(([slug]) => slug);
+    return (
+      <div style={{ width: "100vw", height: "100vh", overflow: "hidden", position: "relative" }}>
+        <ShaderBackground />
+        <div style={{ position: "absolute", inset: 0, top: NAV_H, zIndex: 1 }}>
+          <AtlasStyledMap
+            activeId={null}
+            litIds={generatingLitIds}
+            selectableIds={generatingLitIds}
+            onSelect={() => {}}
+            photoPoints={mapPhotoPoints}
+            representativePhotos={representativePhotos}
+            entryMetaBySlug={entryMetaBySlug}
+            interactiveAreas={false}
+            lockOverviewMinZoom
+            markerStartOffset={0.35}
+            detailPinZoom={13.2}
+          />
+        </div>
+        <nav style={{
+          position: "fixed", top: 0, left: 0, right: 0, height: NAV_H,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 2rem", zIndex: 10,
+        }}>
+          <button onClick={() => navigate("/")} style={{
+            fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic",
+            fontSize: "1.1rem", color: "#ffffff", background: "none", border: "none", cursor: "pointer",
+          }}>CityMood</button>
+        </nav>
+        <div style={{
+          position: "absolute", inset: 0, display: "grid", placeItems: "center", zIndex: 4, paddingTop: NAV_H,
+        }}>
+          <div style={{ width: "min(680px, 90vw)", textAlign: "center" }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+              {mappedRegions.slice(0, 8).map(([slug]) => (
+                <span key={`pill-${slug}`} style={{
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  border: "0.5px solid rgba(155,48,255,0.28)",
+                  background: "rgba(155,48,255,0.11)",
+                  color: "rgba(232,220,252,0.9)",
+                  fontFamily: "'DM Sans', sans-serif",
+                  fontSize: "0.68rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                }}>
+                  {getNeighborhoodName(slug)}
+                </span>
+              ))}
+            </div>
+            <h2 style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "2.6rem",
+              fontWeight: 300,
+              color: "#EDE8F8",
+              marginBottom: 10,
+            }}>
+              Generating your emotional map...
+            </h2>
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif",
+              color: "rgba(210,188,245,0.75)",
+              fontSize: "0.9rem",
+              letterSpacing: "0.03em",
+            }}>
+              {generationMessages[generationStep]}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (routeStep === "customize") {
+    return (
+      <div style={{ width: "100vw", height: "100vh", overflow: "hidden", position: "relative" }}>
+        <ShaderBackground />
+        <nav style={{
+          position: "fixed", top: 0, left: 0, right: 0, height: NAV_H,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 2rem", zIndex: 10,
+        }}>
+          <button onClick={() => navigate("/")} style={{
+            fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic",
+            fontSize: "1.1rem", color: "#ffffff", background: "none", border: "none", cursor: "pointer",
+          }}>CityMood</button>
+          <button
+            onClick={handleFinish}
+            disabled={finishing}
+            style={{
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.7rem",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "#fff",
+              background: "transparent",
+              border: "1.5px solid rgba(255,255,255,0.7)",
+              borderRadius: 100,
+              padding: "6px 16px",
+              cursor: finishing ? "default" : "pointer",
+              opacity: finishing ? 0.6 : 1,
+            }}
+          >
+            {finishing ? "Saving..." : "Publish map →"}
+          </button>
+        </nav>
+        <div style={{ position: "absolute", inset: 0, paddingTop: NAV_H + 18, overflowY: "auto", zIndex: 2 }}>
+          <div style={{ width: "min(960px, 92vw)", margin: "0 auto", padding: "12px 0 42px" }}>
+            <h1 style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "2.5rem",
+              fontWeight: 300,
+              color: "#EDE8F8",
+              marginBottom: 8,
+            }}>Review your AI draft</h1>
+            <p style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontStyle: "italic",
+              fontSize: "1rem",
+              color: "rgba(196,174,244,0.62)",
+              marginBottom: 20,
+            }}>
+              Refine meaning, not visuals.
+            </p>
+            <div style={{ display: "grid", gap: 12 }}>
+              {mappedRegions.map(([slug, data]) => {
+                const row = regionEdits[slug] ?? { phrase: buildEmotionPhrase(data.moods ?? []), tone: data.moods?.[0] ?? "Calm", memory: data.photos[0]?.note ?? "" };
+                const expanded = expandedRegionSlug === slug;
+                return (
+                  <div key={`edit-${slug}`} style={{
+                    border: "0.5px solid rgba(155,48,255,0.22)",
+                    background: "rgba(10,8,20,0.72)",
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <div>
+                        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "1.5rem", color: "#EDE8F8" }}>{getNeighborhoodName(slug)}</div>
+                        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic", color: "rgba(210,188,245,0.72)", fontSize: "0.92rem" }}>
+                          {row.phrase}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedRegionSlug((prev) => (prev === slug ? null : slug))}
+                        style={{
+                          border: "0.5px solid rgba(155,48,255,0.28)",
+                          background: "rgba(155,48,255,0.08)",
+                          borderRadius: 999,
+                          color: "rgba(232,220,252,0.9)",
+                          fontFamily: "'DM Sans', sans-serif",
+                          fontSize: "0.62rem",
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          padding: "6px 10px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {expanded ? "Close" : "Edit"}
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                      {data.photos.slice(0, 4).map((photo, idx) => (
+                        <img key={`${slug}-${idx}`} src={photo.url} alt="" style={{ width: 58, height: 58, borderRadius: 6, objectFit: "cover", border: "0.5px solid rgba(255,255,255,0.1)" }} />
+                      ))}
+                    </div>
+                    {expanded && (
+                      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                        <input
+                          value={row.phrase}
+                          onChange={(e) => setRegionEdits((prev) => ({ ...prev, [slug]: { ...row, phrase: e.target.value } }))}
+                          placeholder="Emotional phrase"
+                          style={{ width: "100%", background: "rgba(155,48,255,0.05)", border: "0.5px solid rgba(155,48,255,0.2)", borderRadius: 8, padding: "8px 10px", color: "rgba(220,205,245,0.9)", fontFamily: "'DM Sans', sans-serif", fontSize: "0.76rem" }}
+                        />
+                        <input
+                          value={row.tone}
+                          onChange={(e) => setRegionEdits((prev) => ({ ...prev, [slug]: { ...row, tone: e.target.value } }))}
+                          placeholder="Tone name (optional)"
+                          style={{ width: "100%", background: "rgba(155,48,255,0.05)", border: "0.5px solid rgba(155,48,255,0.2)", borderRadius: 8, padding: "8px 10px", color: "rgba(220,205,245,0.9)", fontFamily: "'DM Sans', sans-serif", fontSize: "0.76rem" }}
+                        />
+                        <textarea
+                          value={row.memory}
+                          onChange={(e) => setRegionEdits((prev) => ({ ...prev, [slug]: { ...row, memory: e.target.value } }))}
+                          placeholder="Memory text (optional)"
+                          rows={2}
+                          style={{ width: "100%", background: "rgba(155,48,255,0.05)", border: "0.5px solid rgba(155,48,255,0.2)", borderRadius: 8, padding: "8px 10px", color: "rgba(220,205,245,0.9)", fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic", fontSize: "0.92rem", resize: "vertical" }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Render ──
   return (
@@ -985,11 +1625,66 @@ export default function TryPage() {
           photoPoints={mapPhotoPoints}
           representativePhotos={representativePhotos}
           entryMetaBySlug={entryMetaBySlug}
+          emotionRadiusBoost={0.9 * styleFactors.radiusBoost}
+          emotionOpacityBoost={0.8 * styleFactors.opacityBoost}
+          interactiveAreas={false}
           lockOverviewMinZoom
           markerStartOffset={0.35}
           detailPinZoom={13.2}
         />
       </div>
+
+      {flowStep === "entry" && (
+        <div style={{
+          position: "absolute",
+          top: NAV_H,
+          right: 0,
+          bottom: 0,
+          width: "36%",
+          minWidth: 360,
+          zIndex: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "2rem",
+          pointerEvents: "none",
+        }}>
+          <div style={{ maxWidth: 430, pointerEvents: "auto" }}>
+            <h2 style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "2.9rem",
+              fontWeight: 300,
+              color: "#EDE8F8",
+              lineHeight: 1.08,
+              marginBottom: 10,
+            }}>Start your map</h2>
+            <p style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontStyle: "italic",
+              fontSize: "1.05rem",
+              color: "rgba(210,188,245,0.68)",
+              marginBottom: 20,
+            }}>Turn your memories into a map of emotions.</p>
+            <button
+              onClick={startMapFlow}
+              style={{
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: "0.76rem",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "#ffffff",
+                border: "1.5px solid rgba(255,255,255,0.7)",
+                borderRadius: 100,
+                padding: "10px 22px",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+            >
+              Start your map →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 3. Navbar */}
       <nav style={{
@@ -1011,6 +1706,22 @@ export default function TryPage() {
         >CityMood</button>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={startDriftMode}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: "0.68rem",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: driftMode ? "rgba(255,215,122,0.9)" : "rgba(196,174,244,0.55)",
+              padding: 0,
+            }}
+          >
+            {driftMode ? "Drift mode on" : "Start a drift"}
+          </button>
           {mappedCount > 0 && (
             <>
               <span style={{
@@ -1033,7 +1744,7 @@ export default function TryPage() {
                 }}
                 onMouseEnter={e => { if (!finishing) e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
                 onMouseLeave={e => { if (!finishing) e.currentTarget.style.background = "transparent"; }}
-              >{finishing ? "Saving…" : "View my atlas →"}</button>
+              >{finishing ? "Saving…" : (flowStep === "customize" ? "Save your atlas →" : "Generate your map →")}</button>
             </>
           )}
         </div>
@@ -1048,20 +1759,179 @@ export default function TryPage() {
           fontSize: "0.7rem", letterSpacing: "0.15em",
           textTransform: "uppercase", color: "rgba(196,174,244,0.4)", marginBottom: 8,
           fontFamily: "'DM Sans', sans-serif",
-        }}>Build your map</div>
+        }}>{flowStep === "entry" ? "Your NYC map" : "Build your map"}</div>
         <div style={{
           fontFamily: "'Cormorant Garamond', serif",
           fontSize: "4rem", fontWeight: 300, color: "#EDE8F8", lineHeight: 1.1, marginBottom: 6,
-        }}>Your New York City</div>
+        }}>{flowStep === "customize" ? "Refine your emotional map" : "Your New York City"}</div>
         <div style={{
           fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic",
           fontSize: "1.1rem", color: "rgba(196,174,244,0.4)",
-        }}>Select a neighborhood to add your memory</div>
+        }}>
+          {flowStep === "upload" && "Upload your memories"}
+          {flowStep === "locate" && "Assign memories to places in NYC"}
+          {flowStep === "generating" && "Generating your emotional map..."}
+          {flowStep === "customize" && "AI draft first. Refine moods by district."}
+          {flowStep === "entry" && "Start from memory, then shape your map."}
+        </div>
+
+        {driftMode && activeDriftPrompt && (
+          <div style={{
+            marginTop: 14,
+            maxWidth: 340,
+            pointerEvents: "auto",
+            background: "rgba(12,9,22,0.82)",
+            border: "0.5px solid rgba(155,48,255,0.24)",
+            borderRadius: 10,
+            padding: "10px 12px",
+          }}>
+            <div style={{
+              fontSize: "0.58rem",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "rgba(196,174,244,0.45)",
+              marginBottom: 5,
+              fontFamily: "'DM Sans', sans-serif",
+            }}>Drift prompt</div>
+            <div style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontStyle: "italic",
+              fontSize: "0.95rem",
+              color: "rgba(232,220,252,0.82)",
+              lineHeight: 1.45,
+            }}>{activeDriftPrompt}</div>
+          </div>
+        )}
       </div>
 
       {/* 5. Bottom-left mapped list */}
       {mappedCount > 0 && (
         <div style={{ position: "absolute", bottom: "2rem", left: "2rem", zIndex: 10 }}>
+          {flowStep === "customize" && (
+            <div style={{
+              width: 320,
+              marginBottom: 12,
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "0.5px solid rgba(155,48,255,0.25)",
+              background: "rgba(10,8,20,0.82)",
+            }}>
+              <div style={{ fontSize: "0.58rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(196,174,244,0.55)", marginBottom: 8, fontFamily: "'DM Sans', sans-serif" }}>
+                Adjust your map
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(196,174,244,0.48)", marginBottom: 6, fontFamily: "'DM Sans', sans-serif" }}>
+                  Area mood defaults
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 134, overflowY: "auto" }}>
+                  {Object.entries(memories).map(([slug, data]) => {
+                    const areaMoods = normalizeMoods(areaDefaultMoodsBySlug[slug] ?? data.moods ?? []);
+                    return (
+                      <div key={`area-default-${slug}`} style={{ border: "0.5px solid rgba(155,48,255,0.16)", borderRadius: 7, padding: "5px 6px" }}>
+                        <div style={{ fontSize: "0.62rem", color: "rgba(232,220,252,0.9)", fontFamily: "'DM Sans', sans-serif", marginBottom: 4 }}>
+                          {getNeighborhoodName(slug)}
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {MOOD_PRESETS.map((mood) => {
+                            const selected = areaMoods.includes(mood);
+                            return (
+                              <button
+                                key={`area-${slug}-${mood}`}
+                                type="button"
+                                onClick={() => {
+                                  const next = selected
+                                    ? areaMoods.filter((x) => x !== mood)
+                                    : normalizeMoods([...areaMoods, mood]);
+                                  setAreaDefaultMoodsBySlug((prev) => ({ ...prev, [slug]: next }));
+                                }}
+                                style={{
+                                  border: selected ? "0.5px solid rgba(255,215,122,0.7)" : "0.5px solid rgba(155,48,255,0.25)",
+                                  background: selected ? "rgba(255,215,122,0.12)" : "rgba(155,48,255,0.07)",
+                                  borderRadius: 999,
+                                  padding: "2px 7px",
+                                  color: selected ? "rgba(255,235,195,0.98)" : "rgba(225,209,250,0.78)",
+                                  fontSize: "0.58rem",
+                                  cursor: "pointer",
+                                  fontFamily: "'DM Sans', sans-serif",
+                                }}
+                              >
+                                {mood}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                {[
+                  { id: "soft", label: "Soft watercolor" },
+                  { id: "cinematic", label: "Cinematic contrast" },
+                  { id: "warm", label: "Warm memory" },
+                  { id: "dreamlike", label: "Dreamlike haze" },
+                  { id: "cool", label: "Cool minimal" },
+                ].map((item) => {
+                  const active = stylePreset === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setStylePreset(item.id as typeof stylePreset)}
+                      style={{
+                        border: active ? "0.5px solid rgba(255,215,122,0.7)" : "0.5px solid rgba(155,48,255,0.28)",
+                        background: active ? "rgba(255,215,122,0.12)" : "rgba(155,48,255,0.07)",
+                        borderRadius: 999,
+                        padding: "4px 9px",
+                        color: active ? "rgba(255,235,195,0.98)" : "rgba(225,209,250,0.82)",
+                        fontSize: "0.6rem",
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: "0.6rem", color: "rgba(196,174,244,0.62)", fontFamily: "'DM Sans', sans-serif" }}>Emotion intensity</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={1}
+                  value={emotionIntensity === "low" ? 0 : emotionIntensity === "high" ? 2 : 1}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setEmotionIntensity(v <= 0 ? "low" : v >= 2 ? "high" : "medium");
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontSize: "0.6rem", color: "rgba(225,209,250,0.82)", width: 44, textAlign: "right", fontFamily: "'DM Sans', sans-serif" }}>
+                  {emotionIntensity}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPhotoOverrides((prev) => !prev)}
+                style={{
+                  marginTop: 8,
+                  border: "0.5px solid rgba(155,48,255,0.24)",
+                  background: "rgba(155,48,255,0.07)",
+                  borderRadius: 7,
+                  padding: "5px 8px",
+                  color: "rgba(220,205,245,0.84)",
+                  fontSize: "0.6rem",
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                {showPhotoOverrides ? "Hide photo-level overrides" : "Photo-level overrides"}
+              </button>
+            </div>
+          )}
           <div style={{
             fontSize: "0.55rem", letterSpacing: "0.1em",
             textTransform: "uppercase", color: "rgba(196,174,244,0.4)", marginBottom: 8,
@@ -1087,9 +1957,9 @@ export default function TryPage() {
                   <span style={{ width: 8, height: 8, borderRadius: 999, background: data.color || DEFAULT_ENTRY_COLOR, boxShadow: `0 0 8px ${data.color || DEFAULT_ENTRY_COLOR}` }} />
                   <span>{getNeighborhoodName(slug)} · {data.photos.length} photo{data.photos.length !== 1 ? "s" : ""}</span>
                 </div>
-                {data.moods.length > 0 && (
+                {normalizeMoods(areaDefaultMoodsBySlug[slug] ?? data.moods ?? []).length > 0 && (
                   <div style={{ fontSize: "0.62rem", color: "rgba(235, 220, 255, 0.72)", marginTop: 3, letterSpacing: "0.03em" }}>
-                    {data.moods.slice(0, 3).join(" · ")}
+                    {normalizeMoods(areaDefaultMoodsBySlug[slug] ?? data.moods ?? []).slice(0, 3).join(" · ")}
                   </div>
                 )}
               </div>
@@ -1112,7 +1982,7 @@ export default function TryPage() {
             onMouseEnter={e => { if (!finishing) e.currentTarget.style.opacity = "0.65"; }}
             onMouseLeave={e => { if (!finishing) e.currentTarget.style.opacity = "1"; }}
           >
-            {finishing ? "Saving your atlas…" : "Finish & generate your map →"}
+            {finishing ? "Saving your atlas…" : (flowStep === "customize" ? "Save & publish atlas →" : "Generate your map →")}
           </div>
         </div>
       )}
@@ -1185,7 +2055,7 @@ export default function TryPage() {
 
       {/* 7. Upload overlay — always in DOM, CSS controlled */}
       <div style={{
-        position: "fixed", inset: 0, zIndex: 60,
+        position: "fixed", inset: 0, zIndex: 140,
         background: "rgba(10,8,20,0.93)", backdropFilter: "blur(24px)",
         WebkitBackdropFilter: "blur(24px)",
         opacity: showUpload ? 1 : 0,
@@ -1204,7 +2074,7 @@ export default function TryPage() {
             justifyContent: "space-between", marginBottom: 28,
           }}>
             <button
-              onClick={() => setShowUpload(false)}
+              onClick={handleUploadBack}
               style={{
                 background: "none", border: "none", cursor: "pointer",
                 color: "rgba(196,174,244,0.6)", fontSize: "0.75rem",
@@ -1217,51 +2087,24 @@ export default function TryPage() {
             <span style={{
               fontFamily: "'Playfair Display', Georgia, serif", fontStyle: "italic",
               fontSize: "1rem", color: "#EDE8F8",
-            }}>{getNeighborhoodName(selectedSlug)}</span>
+            }}>
+              {flowStep === "upload"
+                ? "Upload your memories"
+                : flowStep === "locate"
+                ? "Location assignment"
+                : flowStep === "generating"
+                ? "Generating your map..."
+                : flowStep === "customize"
+                ? "Refine your emotional draft"
+                : getNeighborhoodName(selectedSlug)}
+            </span>
             <span style={{
               fontSize: "0.7rem", color: "rgba(196,174,244,0.5)",
               fontFamily: "'DM Sans', sans-serif",
             }}>{currentItems.length} photo{currentItems.length !== 1 ? "s" : ""} added</span>
           </div>
 
-          {/* Upload zone */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            style={{
-              border: `1.5px dashed ${dragOver ? "rgba(155,48,255,0.6)" : "rgba(155,48,255,0.25)"}`,
-              borderRadius: 14, minHeight: 160,
-              display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center",
-              gap: 10, cursor: "pointer",
-              background: dragOver ? "rgba(155,48,255,0.05)" : "transparent",
-              transition: "border-color 0.2s ease, background 0.2s ease",
-            }}
-          >
-            {uploading ? (
-              <div style={{ fontSize: "0.72rem", color: "rgba(196,174,244,0.5)", fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.06em" }}>
-                Uploading…
-              </div>
-            ) : (
-              <>
-                <div style={{ fontSize: "1.8rem", color: "rgba(155,48,255,0.4)", lineHeight: 1 }}>+</div>
-                <div style={{ fontSize: "0.78rem", color: "rgba(196,174,244,0.5)", fontFamily: "'DM Sans', sans-serif" }}>
-                  Drop photos here, or click to choose
-                </div>
-              </>
-            )}
-          </div>
-
-          <input
-            ref={fileInputRef}
-            type="file" accept="image/*" multiple
-            style={{ display: "none" }}
-            onChange={handleFileChange}
-          />
-
-          {currentItems.length > 0 && (
+          {flowStep === "customize" && (currentItems.length > 0 || driftMode) && (
             <div style={{ marginTop: 16, border: "0.5px solid rgba(155,48,255,0.16)", borderRadius: 10, padding: "12px 12px 10px", background: "rgba(155,48,255,0.04)" }}>
               <div style={{ fontSize: "0.64rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(196,174,244,0.56)", marginBottom: 8, fontFamily: "'DM Sans', sans-serif" }}>
                 How does this place feel?
@@ -1338,14 +2181,202 @@ export default function TryPage() {
             </div>
           )}
 
+          {/* Upload zone */}
+          <div
+            onClick={() => {
+              fileInputRef.current?.click();
+            }}
+            onDragOver={e => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              handleDrop(e);
+            }}
+            style={{
+              border: `1.5px dashed ${dragOver ? "rgba(155,48,255,0.6)" : "rgba(155,48,255,0.25)"}`,
+              borderRadius: 14, minHeight: 160,
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              gap: 10, cursor: "pointer",
+              background: dragOver ? "rgba(155,48,255,0.05)" : "transparent",
+              transition: "border-color 0.2s ease, background 0.2s ease",
+              opacity: 1,
+            }}
+          >
+            {uploading ? (
+              <div style={{ fontSize: "0.72rem", color: "rgba(196,174,244,0.5)", fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.06em" }}>
+                Uploading…
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: "1.8rem", color: "rgba(155,48,255,0.4)", lineHeight: 1 }}>+</div>
+                <div style={{ fontSize: "0.78rem", color: "rgba(196,174,244,0.5)", fontFamily: "'DM Sans', sans-serif" }}>
+                  Drop photos here, or click to choose
+                </div>
+              </>
+            )}
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file" accept="image/*" multiple
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+
+          {flowStep === "upload" && (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              <input
+                value={cityName}
+                onChange={(e) => setCityName(e.target.value)}
+                placeholder="City name"
+                maxLength={60}
+                style={{
+                  width: "100%",
+                  background: "rgba(155,48,255,0.05)",
+                  border: "0.5px solid rgba(155,48,255,0.15)",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  color: "rgba(220,205,245,0.9)",
+                  fontSize: "0.74rem",
+                  outline: "none",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              />
+              <textarea
+                value={optionalMemory}
+                onChange={(e) => setOptionalMemory(e.target.value)}
+                placeholder="Optional memory"
+                rows={2}
+                maxLength={200}
+                style={{
+                  width: "100%",
+                  background: "rgba(155,48,255,0.05)",
+                  border: "0.5px solid rgba(155,48,255,0.15)",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  color: "rgba(220,205,245,0.9)",
+                  fontSize: "0.74rem",
+                  outline: "none",
+                  resize: "vertical",
+                  fontFamily: "'Cormorant Garamond', serif",
+                  fontStyle: "italic",
+                }}
+              />
+              <div style={{
+                fontSize: "0.64rem",
+                color: "rgba(196,174,244,0.56)",
+                fontFamily: "'DM Sans', sans-serif",
+              }}>
+                We’ll help place your photos on the map.
+              </div>
+            </div>
+          )}
+
           {/* Photo grid */}
           {currentItems.length > 0 && (
-            <div style={{
-              display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 12, marginTop: 20,
-            }}>
+            <div style={{ marginTop: 20 }}>
+              {flowStep === "locate" && (
+                <div style={{
+                  marginBottom: 10,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "0.5px solid rgba(155,48,255,0.22)",
+                  background: "rgba(155,48,255,0.06)",
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 8,
+                  alignItems: "center",
+                }}>
+                  <div style={{ fontSize: "0.64rem", color: "rgba(196,174,244,0.72)", fontFamily: "'DM Sans', sans-serif" }}>
+                    {selectedLocateItems.length} selected for batch assignment
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const slug = e.target.value as Slug;
+                        if (!slug || selectedLocateItems.length === 0) return;
+                        selectedLocateItems.forEach((idx) => setPhotoAssignedSlug(idx, slug));
+                        e.currentTarget.value = "";
+                      }}
+                      style={{
+                        background: "rgba(155,48,255,0.05)",
+                        border: "0.5px solid rgba(155,48,255,0.18)",
+                        borderRadius: 6,
+                        padding: "5px 7px",
+                        color: "rgba(220,205,245,0.85)",
+                        fontSize: "0.62rem",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      <option value="">Assign district…</option>
+                      {HOODS.map((hood) => (
+                        <option key={`batch-${hood.slug}`} value={hood.slug}>{hood.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLocateItems(currentItems.map((_, idx) => idx))}
+                      style={{
+                        border: "0.5px solid rgba(155,48,255,0.22)",
+                        background: "rgba(155,48,255,0.08)",
+                        borderRadius: 6,
+                        padding: "5px 7px",
+                        color: "rgba(220,205,245,0.85)",
+                        fontSize: "0.62rem",
+                        fontFamily: "'DM Sans', sans-serif",
+                        cursor: "pointer",
+                      }}
+                    >All</button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLocateItems([])}
+                      style={{
+                        border: "0.5px solid rgba(155,48,255,0.22)",
+                        background: "rgba(155,48,255,0.08)",
+                        borderRadius: 6,
+                        padding: "5px 7px",
+                        color: "rgba(220,205,245,0.85)",
+                        fontSize: "0.62rem",
+                        fontFamily: "'DM Sans', sans-serif",
+                        cursor: "pointer",
+                      }}
+                    >Clear</button>
+                  </div>
+                </div>
+              )}
+              <div style={{
+                display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 12,
+              }}>
               {currentItems.map((photo, i) => (
                 <div key={i} style={{ position: "relative" }}>
+                  {flowStep === "locate" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLocateItems((prev) =>
+                          prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                        );
+                      }}
+                      style={{
+                        position: "absolute",
+                        top: 6,
+                        left: 6,
+                        width: 18,
+                        height: 18,
+                        borderRadius: 999,
+                        border: "0.5px solid rgba(255,255,255,0.45)",
+                        background: selectedLocateItems.includes(i) ? "rgba(255,215,122,0.88)" : "rgba(7,6,16,0.56)",
+                        cursor: "pointer",
+                        zIndex: 2,
+                      }}
+                      aria-label="Select photo for batch assignment"
+                    />
+                  )}
                   <img src={photo.url} alt="" style={{
                     width: "100%", aspectRatio: "1", objectFit: "cover",
                     borderRadius: 8, display: "block",
@@ -1362,30 +2393,92 @@ export default function TryPage() {
                       lineHeight: 1,
                     }}
                   >×</button>
-                  <textarea
-                    value={photo.note}
-                    onChange={e => updateNote(i, e.target.value)}
-                    placeholder="The story behind this photo..."
-                    maxLength={100}
-                    rows={2}
-                    style={{
-                      width: "100%", marginTop: 6,
-                      background: "rgba(155,48,255,0.05)",
-                      border: "0.5px solid rgba(155,48,255,0.15)",
-                      borderRadius: 6, padding: "6px 8px",
-                      color: "rgba(196,174,244,0.75)",
-                      fontSize: "0.72rem", resize: "none", outline: "none",
-                      fontFamily: "Georgia, serif", fontStyle: "italic",
-                      boxSizing: "border-box",
-                    }}
-                  />
+                  {flowStep !== "upload" && (
+                    <textarea
+                      value={photo.note}
+                      onChange={e => updateNote(i, e.target.value)}
+                      placeholder="The story behind this photo..."
+                      maxLength={100}
+                      rows={2}
+                      style={{
+                        width: "100%", marginTop: 6,
+                        background: "rgba(155,48,255,0.05)",
+                        border: "0.5px solid rgba(155,48,255,0.15)",
+                        borderRadius: 6, padding: "6px 8px",
+                        color: "rgba(196,174,244,0.75)",
+                        fontSize: "0.72rem", resize: "none", outline: "none",
+                        fontFamily: "Georgia, serif", fontStyle: "italic",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  )}
+                  {flowStep === "customize" && showPhotoOverrides && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+                    {MOOD_PRESETS.map((mood) => {
+                      const selected = photo.moods.includes(mood);
+                      return (
+                        <button
+                          key={`${photo.url}-${mood}`}
+                          type="button"
+                          onClick={() => {
+                            const next = selected
+                              ? photo.moods.filter((x) => x !== mood)
+                              : normalizeMoods([...photo.moods, mood]);
+                            setPhotoMoods(i, next, "manual");
+                            if (!selected && next.length === 1) {
+                              updateItem(i, (cur) => ({ ...cur, color: suggestColorFromMood(next[0]) }));
+                            }
+                          }}
+                          style={{
+                            border: selected ? "0.5px solid rgba(255,215,122,0.7)" : "0.5px solid rgba(155,48,255,0.22)",
+                            background: selected ? "rgba(255,215,122,0.12)" : "rgba(155,48,255,0.06)",
+                            borderRadius: 999,
+                            padding: "2px 8px",
+                            color: selected ? "rgba(255,235,195,0.98)" : "rgba(225,209,250,0.78)",
+                            fontSize: "0.62rem",
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >
+                          {mood}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  )}
+                  {flowStep === "customize" && showPhotoOverrides && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => suggestPhotoMoodsWithAI(i)}
+                      disabled={aiSuggestingIndex === i}
+                      style={{
+                        background: "rgba(155,48,255,0.14)",
+                        border: "0.5px solid rgba(155,48,255,0.28)",
+                        borderRadius: 6,
+                        padding: "5px 8px",
+                        color: "rgba(232,220,252,0.9)",
+                        fontSize: "0.62rem",
+                        cursor: aiSuggestingIndex === i ? "default" : "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      {aiSuggestingIndex === i ? "Suggesting..." : "Suggest moods with AI"}
+                    </button>
+                    {photo.moodConfidence ? (
+                      <span style={{ fontSize: "0.58rem", color: "rgba(196,174,244,0.6)", fontFamily: "'DM Sans', sans-serif" }}>
+                        {Math.round(photo.moodConfidence * 100)}%
+                      </span>
+                    ) : null}
+                  </div>
+                  )}
+                  {flowStep === "locate" && (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6, marginTop: 6 }}>
                     <select
-                      value=""
+                      value={photo.assignedSlug ?? ""}
                       onChange={e => {
                         const slug = e.target.value as Slug;
-                        if (slug) applyNeighborhoodPreset(i, slug);
-                        e.currentTarget.value = "";
+                        if (slug) setPhotoAssignedSlug(i, slug);
                       }}
                       style={{
                         width: "100%",
@@ -1398,7 +2491,7 @@ export default function TryPage() {
                         boxSizing: "border-box",
                       }}
                     >
-                      <option value="">Choose neighborhood preset…</option>
+                      <option value="">Choose neighborhood…</option>
                       {HOODS.map(hood => (
                         <option key={`preset-${hood.slug}`} value={hood.slug}>
                           {hood.name}
@@ -1512,11 +2605,63 @@ export default function TryPage() {
                       fontFamily: "'DM Sans', sans-serif",
                       letterSpacing: "0.02em",
                     }}>
-                      Source: {photo.locationSource.toUpperCase()}
+                      Area: {getNeighborhoodName(photo.assignedSlug)} · Source: {photo.source === "ai-assisted" ? "AI-assisted" : "Manual"}
                     </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                      {MOOD_PRESETS.map((mood) => {
+                        const selected = (photo.moods ?? []).includes(mood);
+                        return (
+                          <button
+                            key={`locate-mood-${photo.url}-${mood}`}
+                            type="button"
+                            onClick={() => {
+                              const next = selected
+                                ? (photo.moods ?? []).filter((x) => x !== mood)
+                                : normalizeMoods([...(photo.moods ?? []), mood]);
+                              setPhotoMoods(i, next, "manual");
+                              if (!selected && next.length === 1) {
+                                updateItem(i, (cur) => ({ ...cur, color: suggestColorFromMood(next[0]) }));
+                              }
+                            }}
+                            style={{
+                              border: selected ? "0.5px solid rgba(255,215,122,0.7)" : "0.5px solid rgba(155,48,255,0.22)",
+                              background: selected ? "rgba(255,215,122,0.12)" : "rgba(155,48,255,0.06)",
+                              borderRadius: 999,
+                              padding: "2px 8px",
+                              color: selected ? "rgba(255,235,195,0.98)" : "rgba(225,209,250,0.78)",
+                              fontSize: "0.62rem",
+                              cursor: "pointer",
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            {mood}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => suggestPhotoMoodsWithAI(i)}
+                      disabled={aiSuggestingIndex === i}
+                      style={{
+                        alignSelf: "start",
+                        background: "rgba(155,48,255,0.14)",
+                        border: "0.5px solid rgba(155,48,255,0.28)",
+                        borderRadius: 6,
+                        padding: "5px 8px",
+                        color: "rgba(232,220,252,0.9)",
+                        fontSize: "0.62rem",
+                        cursor: aiSuggestingIndex === i ? "default" : "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      {aiSuggestingIndex === i ? "Suggesting..." : "Suggest moods with AI"}
+                    </button>
                   </div>
+                  )}
                 </div>
               ))}
+              </div>
             </div>
           )}
 
@@ -1529,6 +2674,40 @@ export default function TryPage() {
             borderTop: "0.5px solid rgba(155,48,255,0.1)",
             padding: "16px 0", marginTop: 24,
           }}>
+            {flowStep === "upload" ? (
+              <button
+                onClick={goToGenerateStep}
+                style={{
+                  width: "100%", height: 52,
+                  background: "#9B30FF", color: "#EDE8F8",
+                  border: "none", borderRadius: 100,
+                  fontSize: "0.85rem", letterSpacing: "0.06em", cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif", transition: "background 0.2s",
+                }}
+              >Generate your map →</button>
+            ) : flowStep === "locate" ? (
+              <button
+                onClick={triggerGenerateDraft}
+                style={{
+                  width: "100%", height: 52,
+                  background: "#9B30FF", color: "#EDE8F8",
+                  border: "none", borderRadius: 100,
+                  fontSize: "0.85rem", letterSpacing: "0.06em", cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif", transition: "background 0.2s",
+                }}
+              >Generate your map →</button>
+            ) : flowStep === "generating" ? (
+              <button
+                disabled
+                style={{
+                  width: "100%", height: 52,
+                  background: "rgba(155,48,255,0.45)", color: "rgba(237,232,248,0.75)",
+                  border: "none", borderRadius: 100,
+                  fontSize: "0.85rem", letterSpacing: "0.06em", cursor: "default",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >Generating your map...</button>
+            ) : (
             <button
               onClick={handleSaveAndAddAnother}
               style={{
@@ -1541,6 +2720,7 @@ export default function TryPage() {
               onMouseEnter={e => (e.currentTarget.style.background = "rgba(155,48,255,0.8)")}
               onMouseLeave={e => (e.currentTarget.style.background = "#9B30FF")}
             >Save &amp; add another →</button>
+            )}
           </div>
         </div>
       </div>
@@ -1555,8 +2735,8 @@ export default function TryPage() {
           background: "rgba(10,8,20,0.72)",
           backdropFilter: "blur(10px)",
           WebkitBackdropFilter: "blur(10px)",
-          opacity: showIdentityStep ? 1 : 0,
-          pointerEvents: showIdentityStep ? "all" : "none",
+          opacity: (showIdentityStep && flowStep === "customize") ? 1 : 0,
+          pointerEvents: (showIdentityStep && flowStep === "customize") ? "all" : "none",
           transition: "opacity 0.22s ease",
           display: "flex",
           alignItems: "center",
