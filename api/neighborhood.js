@@ -13,16 +13,36 @@ export default async function handler(req, res) {
 
 function extractNeighborhood(results) {
   if (!results?.length) return 'Unknown'
-  for (const result of results) {
-    for (const component of result.address_components) {
-      if (component.types.includes('neighborhood')) return component.long_name
-      if (component.types.includes('sublocality_level_1')) return component.long_name
+
+  const priority = [
+    'neighborhood',
+    'sublocality_level_1',
+    'sublocality',
+    'premise',
+    'natural_feature',
+  ]
+
+  for (const type of priority) {
+    for (const result of results) {
+      for (const component of result.address_components) {
+        if (component.types.includes(type)) return component.long_name
+      }
     }
   }
+
+  // final fallback: first political subdivision that isn't the city or country
   for (const result of results) {
     for (const component of result.address_components) {
-      if (component.types.includes('locality')) return component.long_name
+      if (
+        component.types.includes('political') &&
+        !component.types.includes('locality') &&
+        !component.types.includes('administrative_area_level_1') &&
+        !component.types.includes('country')
+      ) {
+        return component.long_name
+      }
     }
   }
+
   return 'Unknown'
 }
