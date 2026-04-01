@@ -4,6 +4,9 @@ import * as exifr from "exifr";
 import ShaderBackground from "../components/home/ShaderBackground";
 import { supabase } from "../lib/supabase";
 import AtlasStyledMap, { type EntryMapMeta, type MapPhotoPoint, type RepresentativePhoto } from "../components/AtlasStyledMap";
+import { analyzePhoto } from "../lib/analyzePhoto";
+import { fileToBase64 } from "../lib/toBase64";
+import { getEmotion } from "../lib/emotions";
 
 // ─────────────────────────────────────────────
 //  Neighborhood data
@@ -882,7 +885,7 @@ export default function TryPage() {
     return updated;
   };
 
-  const triggerGenerateDraft = () => {
+  const triggerGenerateDraft = async () => {
     const mergedMemories = mergeCurrentItemsIntoMemories(memories);
     const totalPhotos = Object.values(mergedMemories).reduce((sum, entry) => sum + (entry.photos?.length ?? 0), 0);
     if (Object.keys(mergedMemories).length === 0 || totalPhotos === 0) {
@@ -894,45 +897,57 @@ export default function TryPage() {
     setSelectedLocateItems([]);
     setFlowStep("generating");
     setUploadError(null);
-    const withAISuggestions: MemoryStore = Object.fromEntries(
-      Object.entries(mergedMemories).map(([slug, entry]) => [
-        slug,
-        {
-          ...entry,
-          photos: entry.photos.map((photo) => {
-            if ((photo.moods?.length ?? 0) > 0) return photo;
-            const signal = `${photo.note} ${photo.manualPlaceName}`.trim();
-            const result = suggestMoodsHeuristic(signal);
-            return {
-              ...photo,
-              moods: normalizeMoods(result.moods),
-              aiSuggestedMoods: normalizeMoods(result.moods),
-              moodConfidence: result.confidence,
-              styleHint: photo.styleHint ?? result.styleHint,
-              source: "ai-assisted" as const,
-              color: suggestColorFromMood(result.moods[0]),
-            };
-          }),
-        },
-      ]),
-    );
+    const withAISuggestions: MemoryStore = {};
+    for (const [slug, entry] of Object.entries(mergedMemories)) {
+      const processedPhotos: PhotoMemory[] = [];
+      for (const photo of entry.photos) {
+        if ((photo.moods?.length ?? 0) > 0) {
+          processedPhotos.push(photo);
+          continue;
+        }
+        try {
+          const blob = await fetch(photo.url).then(r => r.blob());
+          const base64 = await fileToBase64(blob as File);
+          const emotionId = await analyzePhoto({ imageBase64: base64 });
+          const emotion = getEmotion(emotionId);
+          processedPhotos.push({
+            ...photo,
+            moods: normalizeMoods([emotionId]),
+            aiSuggestedMoods: normalizeMoods([emotionId]),
+            color: emotion.color,
+            source: "ai-assisted" as const,
+          });
+        } catch {
+          const signal = `${photo.note} ${photo.manualPlaceName}`.trim();
+          const result = suggestMoodsHeuristic(signal);
+          processedPhotos.push({
+            ...photo,
+            moods: normalizeMoods(result.moods),
+            aiSuggestedMoods: normalizeMoods(result.moods),
+            moodConfidence: result.confidence,
+            styleHint: photo.styleHint ?? result.styleHint,
+            source: "ai-assisted" as const,
+            color: suggestColorFromMood(result.moods[0]),
+          });
+        }
+      }
+      withAISuggestions[slug] = { ...entry, photos: processedPhotos };
+    }
     const draftAreaDefaults: Record<string, string[]> = Object.fromEntries(
       Object.entries(withAISuggestions).map(([slug, entry]) => {
         const moods = normalizeMoods(entry.photos.flatMap((photo) => photo.moods ?? []));
         return [slug, moods.length > 0 ? moods : normalizeMoods(entry.moods ?? [])];
       }),
     );
-    window.setTimeout(() => {
-      setMemories(withAISuggestions);
-      setAreaDefaultMoodsBySlug(draftAreaDefaults);
-      setFlowStep("customize");
-      setShowUpload(false);
-      setShowPanel(false);
-      setSelectedSlug(null);
-      if (location.pathname === "/generate") {
-        navigate("/edit");
-      }
-    }, 2200);
+    setMemories(withAISuggestions);
+    setAreaDefaultMoodsBySlug(draftAreaDefaults);
+    setFlowStep("customize");
+    setShowUpload(false);
+    setShowPanel(false);
+    setSelectedSlug(null);
+    if (location.pathname === "/generate") {
+      navigate("/edit");
+    }
   };
 
   const uploadFile = async (file: File, slug: string): Promise<string> => {
